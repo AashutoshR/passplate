@@ -1,0 +1,251 @@
+{
+  "steps": [
+    {
+      "persona": "Maya",
+      "step": "opens the home page on her phone",
+      "ok": true,
+      "ms": 2704
+    },
+    {
+      "persona": "Maya",
+      "step": "picks 4 guests in the booking bar and taps Find a table",
+      "ok": true,
+      "ms": 840
+    },
+    {
+      "persona": "Maya",
+      "step": "finds a free time",
+      "ok": true,
+      "ms": 915
+    },
+    {
+      "persona": "Maya",
+      "step": "fills in her details",
+      "ok": true,
+      "ms": 686
+    },
+    {
+      "persona": "Maya",
+      "step": "confirms the booking",
+      "ok": true,
+      "ms": 580
+    },
+    {
+      "persona": "Maya",
+      "step": "cancels the booking",
+      "ok": true,
+      "ms": 1138
+    },
+    {
+      "persona": "Sam",
+      "step": "signs in",
+      "ok": true,
+      "ms": 2564
+    },
+    {
+      "persona": "Sam",
+      "step": "sees 7 of 8 stamps",
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "persona": "Sam",
+      "step": "orders a Margherita to collect and pays",
+      "ok": true,
+      "ms": 4701
+    },
+    {
+      "persona": "Sam",
+      "step": "the kitchen cooks it and he collects it",
+      "ok": true,
+      "ms": 1659
+    },
+    {
+      "persona": "Sam",
+      "step": "the eighth stamp turns into a reward",
+      "ok": true,
+      "ms": 4
+    },
+    {
+      "persona": "Sam",
+      "step": "spends the reward on the next order",
+      "ok": true,
+      "ms": 7528
+    },
+    {
+      "persona": "Priya",
+      "step": "creates an account",
+      "ok": true,
+      "ms": 3286
+    },
+    {
+      "persona": "Priya",
+      "step": "switches to delivery and fills a basket",
+      "ok": true,
+      "ms": 5825
+    },
+    {
+      "persona": "Priya",
+      "step": "finds her address by postcode",
+      "ok": true,
+      "ms": 1372
+    },
+    {
+      "persona": "Priya",
+      "step": "pays",
+      "ok": true,
+      "ms": 721
+    },
+    {
+      "persona": "Dee",
+      "step": "signs in on the driver screen",
+      "ok": true,
+      "ms": 2905
+    },
+    {
+      "persona": "Priya",
+      "step": "the kitchen cooks it",
+      "ok": true,
+      "ms": 1196
+    },
+    {
+      "persona": "Dee",
+      "step": "sees it ready (live) and takes it",
+      "ok": true,
+      "ms": 777
+    },
+    {
+      "persona": "Dee",
+      "step": "drives the route",
+      "ok": true,
+      "ms": 588
+    },
+    {
+      "persona": "Priya",
+      "step": "watches the rider move on her map",
+      "ok": true,
+      "ms": 8014
+    },
+    {
+      "persona": "Dee",
+      "step": "hands it over",
+      "ok": true,
+      "ms": 519
+    },
+    {
+      "persona": "Priya",
+      "step": "sees it delivered",
+      "ok": true,
+      "ms": 4
+    },
+    {
+      "persona": "Marco",
+      "step": "signs in and opens the floor",
+      "ok": true,
+      "ms": 2885
+    },
+    {
+      "persona": "Asha",
+      "step": "signs in and opens transactions",
+      "ok": true,
+      "ms": 2790
+    },
+    {
+      "persona": "Marco",
+      "step": "seats two walk-ins at Table 2",
+      "ok": true,
+      "ms": 1071
+    },
+    {
+      "persona": "Marco",
+      "step": "sees the guests' QR order arrive without reloading",
+      "ok": true,
+      "ms": 254
+    },
+    {
+      "persona": "Marco",
+      "step": "the kitchen serves it; the table shows Eating",
+      "ok": true,
+      "ms": 1651
+    },
+    {
+      "persona": "Marco",
+      "step": "settles the bill by card",
+      "ok": true,
+      "ms": 1042
+    },
+    {
+      "persona": "Asha",
+      "step": "sees Marco's card payment appear live",
+      "ok": true,
+      "ms": 5
+    },
+    {
+      "persona": "Asha",
+      "step": "opens the overview: takings, two weeks of trade, best sellers",
+      "ok": true,
+      "ms": 1043
+    },
+    {
+      "persona": "Marco",
+      "step": "resets the table",
+      "ok": true,
+      "ms": 528
+    },
+    {
+      "persona": "Crowd",
+      "step": "30 guests book Saturday 2026-11-28 at 20:00 for four at the same moment",
+      "ok": true,
+      "ms": 1450,
+      "note": "10 booked, each on a different table (Table 1, Table 8, Table 3, Table 7, Table 2, Table 13, Table 14, Table 10, Table 9, Table 4); 20 were told it had just been taken; 20:00 now shows as full."
+    }
+  ],
+  "findings": [],
+  "shots": [
+    {
+      "persona": "Maya",
+      "file": "maya-booked.jpg",
+      "caption": "Maya's confirmation, with her reference"
+    },
+    {
+      "persona": "Sam",
+      "file": "sam-reward.jpg",
+      "caption": "Sam's eighth order: the reward appears on the order page"
+    },
+    {
+      "persona": "Sam",
+      "file": "sam-checkout-reward.jpg",
+      "caption": "Sam's basket with 20% off"
+    },
+    {
+      "persona": "Priya",
+      "file": "priya-checkout.jpg",
+      "caption": "Priya's delivery checkout: address, fee and total"
+    },
+    {
+      "persona": "Priya",
+      "file": "priya-tracking.jpg",
+      "caption": "Priya's order page: the rider moving towards her"
+    },
+    {
+      "persona": "Dee",
+      "file": "dee-route.jpg",
+      "caption": "Dee's driver screen during the delivery"
+    },
+    {
+      "persona": "Marco",
+      "file": "marco-floor.jpg",
+      "caption": "Marco's floor: the walk-in's order shows live"
+    },
+    {
+      "persona": "Asha",
+      "file": "asha-transactions.jpg",
+      "caption": "Asha's transactions: the card payment arrives on its own"
+    },
+    {
+      "persona": "Asha",
+      "file": "asha-overview.jpg",
+      "caption": "Asha's overview"
+    }
+  ]
+}

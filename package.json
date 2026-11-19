@@ -1,0 +1,28 @@
+{
+  "name": "pass-platform",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "infra:up": "docker compose up -d --wait",
+    "infra:down": "docker compose down",
+    "db:generate": "bun run --cwd packages/db generate",
+    "db:migrate": "bun run --cwd packages/db migrate",
+    "db:seed": "bun run --cwd packages/db seed",
+    "setup": "bun run infra:up && bun run db:migrate && bun run db:seed && bun run media",
+    "dev": "bun run --filter \"./apps/*\" dev",
+    "test": "bun test packages apps/api",
+    "typecheck": "bun run --filter \"*\" typecheck",
+    "latency": "bun scripts/latency.ts",
+    "media": "bun scripts/fetch-media.ts",
+    "screenshots": "bun scripts/screenshots.ts",
+    "simulate": "bun scripts/simulate.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@pass/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@pass/db": "workspace:*",
+    "ioredis": "^6.0.0",
+    "postgres": "^4.1.1"
+  }
+}

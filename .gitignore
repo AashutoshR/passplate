@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.output/
+.vinxi/
+.tanstack/
+.nitro/
+*.log
+.env
+.env.*
+!.env.example
+coverage/
+results/
+.DS_Store
+
+# Stock footage is fetched by bun run media, never committed (Pexels license).
+apps/web/public/media/
