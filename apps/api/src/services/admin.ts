@@ -14,9 +14,9 @@ export async function adminOverview(db: Db, loc: Location, now = new Date()): Pr
   const revenue = await takings(db, loc.id, dayStart, dayEnd);
   const [counts] = await db
     .select({
-      orders: sql<number>`count(*) filter (where ${orders.status} <> 'cancelled')::int`,
-      deliveries: sql<number>`count(*) filter (where ${orders.type} = 'delivery' and ${orders.status} <> 'cancelled')::int`,
-      paidTotal: sql<number>`coalesce(sum(${orders.totalMinor}) filter (where ${orders.status} <> 'cancelled'), 0)::int`,
+      orders: sql<number>`count(*) filter (where ${orders.status} not in ('cancelled', 'awaiting_payment'))::int`,
+      deliveries: sql<number>`count(*) filter (where ${orders.type} = 'delivery' and ${orders.status} not in ('cancelled', 'awaiting_payment'))::int`,
+      paidTotal: sql<number>`coalesce(sum(${orders.totalMinor}) filter (where ${orders.status} not in ('cancelled', 'awaiting_payment')), 0)::int`,
     })
     .from(orders)
     .where(and(eq(orders.locationId, loc.id), gte(orders.createdAt, dayStart), lt(orders.createdAt, dayEnd)));
@@ -59,7 +59,7 @@ export async function adminOverview(db: Db, loc: Location, now = new Date()): Pr
     })
     .from(orderItems)
     .innerJoin(orders, eq(orders.id, orderItems.orderId))
-    .where(and(eq(orders.locationId, loc.id), gte(orders.createdAt, from), sql`${orders.status} <> 'cancelled'`))
+    .where(and(eq(orders.locationId, loc.id), gte(orders.createdAt, from), sql`${orders.status} not in ('cancelled', 'awaiting_payment')`))
     .groupBy(orderItems.name)
     .orderBy(sql`sum(${orderItems.quantity}) desc`)
     .limit(8);

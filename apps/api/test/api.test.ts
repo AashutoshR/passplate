@@ -1,30 +1,37 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { and, eq, sql } from "drizzle-orm";
 import {
-  DEMO_KITCHEN_CODE,
+  DEMO_ACCOUNTS,
   createDb,
   locations,
   menuItems,
   orders,
   orderTransitions,
   outbox,
-  runMigrations,
   seedDemo,
 } from "@pass/db";
 import type { MenuView, TicketView } from "@pass/shared";
 import { createApp } from "../src/app";
+import { testDatabaseUrl } from "./containers";
 
-const TEST_URL = process.env.TEST_DATABASE_URL ?? "postgres://pass:pass@localhost:5433/pass_test";
-await runMigrations(TEST_URL);
+const TEST_URL = await testDatabaseUrl();
 const { db, sql: pg } = createDb({ url: TEST_URL, max: 20, appName: "pass-test" });
 const app = createApp({ db, log: false });
 
 let seed: Awaited<ReturnType<typeof seedDemo>>;
 let menu: MenuView;
+let kitchenHeaders: Record<string, string>;
 
 beforeEach(async () => {
   seed = await seedDemo(db);
   menu = await (await app.request(`/v1/locations/${seed.locationSlug}/menu`)).json();
+  // The kitchen screen signs in with a staff account (FR-22).
+  const login = await app.request("/v1/account/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: DEMO_ACCOUNTS.kitchen.email, password: DEMO_ACCOUNTS.kitchen.password }),
+  });
+  kitchenHeaders = { "Content-Type": "application/json", Cookie: login.headers.get("Set-Cookie")!.split(";")[0]! };
 });
 afterAll(async () => {
   await pg.end();
@@ -43,7 +50,22 @@ function order(body: Record<string, unknown>, key = crypto.randomUUID()) {
   });
 }
 
-const kitchenHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${DEMO_KITCHEN_CODE}` };
+/** Pays for a collect or delivery order with the built-in test provider. */
+function pay(orderId: string, outcome: "succeeded" | "declined" = "succeeded") {
+  return app.request(`/v1/orders/${orderId}/payment/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ outcome }),
+  });
+}
+
+/** Orders to collect and pays, so the kitchen has the ticket. */
+async function paidOrder(body: Record<string, unknown>): Promise<TicketView> {
+  const placed = (await (await order(body)).json()) as TicketView;
+  const res = await pay(placed.id);
+  expect(res.status).toBe(200);
+  return (await res.json()) as TicketView;
+}
 
 function transition(orderId: string, from: string, to: string, actionId = crypto.randomUUID()) {
   return app.request(`/v1/kitchen/${seed.locationId}/tickets/${orderId}/transition`, {
@@ -86,15 +108,14 @@ describe("placing orders", () => {
     });
     expect(res.status).toBe(201);
     const ticket = (await res.json()) as TicketView;
-    expect(ticket.status).toBe("received");
     expect(ticket.subtotalMinor).toBe((1550 + 150) * 2);
     expect(ticket.items[0]!.modifiers).toEqual(["Medium", "Bacon"]);
-
-    const events = await db.select().from(outbox);
-    // Pickup is paid online when ordering, so the admin screen hears about the payment too.
-    expect(events.map((e) => e.type).sort()).toEqual(["order.updated", "payment.recorded", "ticket.created"]);
-    expect(ticket.paid).toBe(true);
     expect(ticket.totalMinor).toBe(ticket.subtotalMinor);
+    // FR-8: collect orders wait for payment, and the kitchen hears nothing yet.
+    expect(ticket.status).toBe("awaiting_payment");
+    expect(ticket.paid).toBe(false);
+    expect(ticket.payment?.provider).toBe("test");
+    expect((await db.select().from(outbox)).map((e) => e.type)).toEqual(["order.updated"]);
   });
 
   test("enforces modifier rules", async () => {
@@ -191,14 +212,20 @@ describe("stock (FR-6)", () => {
 });
 
 describe("kitchen (FR-10, FR-11, FR-13)", () => {
-  test("needs the kitchen code", async () => {
-    const res = await app.request(`/v1/kitchen/${seed.locationId}/tickets`, {
-      headers: { Authorization: "Bearer wrong" },
+  test("needs a staff sign-in for this restaurant", async () => {
+    expect((await app.request(`/v1/kitchen/${seed.locationId}/tickets`)).status).toBe(401);
+    const guest = await app.request("/v1/account/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: DEMO_ACCOUNTS.customer.email, password: DEMO_ACCOUNTS.customer.password }),
     });
-    expect(res.status).toBe(401);
+    const cookie = guest.headers.get("Set-Cookie")!.split(";")[0]!;
+    expect((await app.request(`/v1/kitchen/${seed.locationId}/tickets`, { headers: { Cookie: cookie } })).status).toBe(403);
   });
 
   test("snapshot lists active tickets", async () => {
+    await paidOrder({ items: [{ menuItemId: item("Fries").id, quantity: 1 }] });
+    // An unpaid order is not on the kitchen screen.
     await order({ items: [{ menuItemId: item("Fries").id, quantity: 1 }] });
     const res = await app.request(`/v1/kitchen/${seed.locationId}/tickets`, { headers: kitchenHeaders });
     const snap = await res.json();
@@ -207,24 +234,26 @@ describe("kitchen (FR-10, FR-11, FR-13)", () => {
   });
 
   test("moves tickets through the state machine and records who did it", async () => {
-    const t = (await (await order({ items: [{ menuItemId: item("Fries").id, quantity: 1 }] })).json()) as TicketView;
+    const t = await paidOrder({ items: [{ menuItemId: item("Fries").id, quantity: 1 }] });
     expect((await transition(t.id, "received", "cooking")).status).toBe(200);
     expect((await transition(t.id, "cooking", "ready")).status).toBe(200);
     const done = await transition(t.id, "ready", "completed");
     expect(((await done.json()) as TicketView).status).toBe("completed");
     const trail = await db.select().from(orderTransitions).where(eq(orderTransitions.orderId, t.id));
-    expect(trail.map((r) => r.toStatus)).toEqual(["cooking", "ready", "completed"]);
-    expect(trail.every((r) => r.device === "test")).toBe(true);
+    // The payment moved it to received; staff did the rest, and the trail says who.
+    expect(trail.map((r) => r.toStatus)).toEqual(["received", "cooking", "ready", "completed"]);
+    expect(trail[0]!.actor).toBe("payment:test");
+    expect(trail.slice(1).every((r) => r.device === "test" && r.actor.startsWith("staff:"))).toBe(true);
   });
 
   test("rejects invalid jumps", async () => {
-    const t = (await (await order({ items: [{ menuItemId: item("Fries").id, quantity: 1 }] })).json()) as TicketView;
+    const t = await paidOrder({ items: [{ menuItemId: item("Fries").id, quantity: 1 }] });
     const res = await transition(t.id, "received", "completed");
     expect(res.status).toBe(422);
   });
 
   test("replaying the same action is safe, a stale one is refused", async () => {
-    const t = (await (await order({ items: [{ menuItemId: item("Fries").id, quantity: 1 }] })).json()) as TicketView;
+    const t = await paidOrder({ items: [{ menuItemId: item("Fries").id, quantity: 1 }] });
     const actionId = crypto.randomUUID();
     const first = await transition(t.id, "received", "cooking", actionId);
     const again = await transition(t.id, "received", "cooking", actionId);
@@ -232,7 +261,7 @@ describe("kitchen (FR-10, FR-11, FR-13)", () => {
     expect(again.status).toBe(200);
     expect(again.headers.get("Idempotent-Replayed")).toBe("true");
     const trail = await db.select().from(orderTransitions).where(eq(orderTransitions.orderId, t.id));
-    expect(trail).toHaveLength(1);
+    expect(trail.filter((r) => r.actor.startsWith("staff:"))).toHaveLength(1);
 
     await transition(t.id, "cooking", "ready");
     const stale = await transition(t.id, "cooking", "cancelled");
@@ -241,7 +270,7 @@ describe("kitchen (FR-10, FR-11, FR-13)", () => {
 
   test("cancelling gives counted stock back", async () => {
     const tart = item("Dark chocolate tart").id;
-    const t = (await (await order({ items: [{ menuItemId: tart, quantity: 2 }] })).json()) as TicketView;
+    const t = await paidOrder({ items: [{ menuItemId: tart, quantity: 2 }] });
     await transition(t.id, "received", "cancelled");
     const [row] = await db
       .select()

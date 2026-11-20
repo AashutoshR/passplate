@@ -7,3 +7,4 @@ export * from "./views";
 export * from "./accounts";
 export * from "./booking";
 export * from "./delivery";
+export * from "./menu-admin";

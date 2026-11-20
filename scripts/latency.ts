@@ -1,6 +1,8 @@
 /**
- * Milestone 1 acceptance check: an order placed through the API reaches the
- * kitchen screen's WebSocket in under 1 second at p95 (FR-10).
+ * FR-10 acceptance check: a paid order reaches the kitchen screen's WebSocket
+ * in under 1 second at p95, timed from the moment the payment is confirmed.
+ * Orders are paid with the built-in test provider, the same path a Stripe
+ * webhook takes.
  *
  * Also checks NFR-7: a client that reconnects with an old `since` receives
  * every ticket it missed, in order.
@@ -11,7 +13,6 @@
 
 const API = process.env.API_URL ?? "http://localhost:4000";
 const WS = process.env.WS_URL ?? "ws://localhost:4100/ws";
-const CODE = process.env.KITCHEN_CODE ?? "demo-kitchen";
 const TOTAL = Number(process.argv[2] ?? 200);
 const CONCURRENCY = Number(process.argv[3] ?? 10);
 
@@ -31,7 +32,14 @@ const items: Item[] = menu.categories
   .filter((i: Item) => i.stock === null && !i.soldOut && i.modifierGroups.every((g) => g.minSelect === 0));
 if (items.length === 0) throw new Error("No unlimited items without required options to order");
 
-const auth = { Authorization: `Bearer ${CODE}` };
+// The kitchen screen signs in with its own staff account (FR-22).
+const login = await fetch(`${API}/v1/account/login`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ email: "kitchen@passplate.test", password: process.env.KITCHEN_PASSWORD ?? "passplate-kitchen" }),
+});
+if (!login.ok) throw new Error(`Kitchen sign-in failed (${login.status}). Run bun run db:seed.`);
+const auth = { Cookie: login.headers.get("Set-Cookie")!.split(";")[0]! };
 const snapshot = await (await fetch(`${API}/v1/kitchen/${locationId}/tickets`, { headers: auth })).json();
 const startSeq: number = snapshot.seq;
 
@@ -43,9 +51,9 @@ const allSeen = new Promise<void>((r) => (resolveAll = r));
 
 function connect(since: number, onTicket: (name: string, seq: number) => void): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(WS);
-    ws.onopen = () =>
-      ws.send(JSON.stringify({ op: "subscribe", channels: [`kitchen:${locationId}`], since, token: CODE }));
+    // Bun's WebSocket can send the session cookie, as a browser on the same site would.
+    const ws = new WebSocket(WS, { headers: auth } as unknown as string[]);
+    ws.onopen = () => ws.send(JSON.stringify({ op: "subscribe", channels: [`kitchen:${locationId}`], since }));
     ws.onerror = (e) => reject(e);
     ws.onmessage = (m) => {
       const msg = JSON.parse(String(m.data));
@@ -70,10 +78,13 @@ async function workerLoop() {
     const i = next++;
     const name = `${runTag}-${i}`;
     const item = items[i % items.length]!;
-    sentAt.set(name, performance.now());
+    // Each order is a different guest with their own address (TEST-NET-2), so
+    // the API's per-address rate limit treats them as people, not one script.
+    // The dev API trusts X-Forwarded-For (TRUST_PROXY=1).
+    const guest = { "X-Forwarded-For": `198.51.100.${(i % 250) + 1}` };
     const res = await fetch(`${API}/v1/orders`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+      headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID(), ...guest },
       body: JSON.stringify({
         locationSlug: slug,
         type: "pickup",
@@ -83,8 +94,20 @@ async function workerLoop() {
     });
     if (res.status !== 201) {
       failures++;
-      sentAt.delete(name);
       console.error(`order ${i} failed: ${res.status} ${await res.text()}`);
+      continue;
+    }
+    const { id } = (await res.json()) as { id: string };
+    sentAt.set(name, performance.now());
+    const paid = await fetch(`${API}/v1/orders/${id}/payment/test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...guest },
+      body: JSON.stringify({ outcome: "succeeded" }),
+    });
+    if (!paid.ok) {
+      failures++;
+      sentAt.delete(name);
+      console.error(`payment ${i} failed: ${paid.status} ${await paid.text()}`);
     }
   }
 }
@@ -117,7 +140,7 @@ console.log("");
 console.log(`Orders sent:        ${TOTAL} (${CONCURRENCY} at a time, ${(TOTAL / wall).toFixed(0)} orders/s)`);
 console.log(`Order failures:     ${failures}`);
 console.log(`Tickets received:   ${latencies.length} of ${expected}`);
-console.log(`Order to kitchen:   p50 ${fmt(pct(50))}, p95 ${fmt(pct(95))}, p99 ${fmt(pct(99))}, max ${fmt(latencies.at(-1)!)}`);
+console.log(`Paid to kitchen:    p50 ${fmt(pct(50))}, p95 ${fmt(pct(95))}, p99 ${fmt(pct(99))}, max ${fmt(latencies.at(-1)!)}`);
 console.log(`Replay after drop:  ${replayed.length} of ${expected} tickets, in order: ${ordered ? "yes" : "no"}`);
 
 const pass = failures === 0 && latencies.length === expected && pct(95) < 1000 && replayed.length === expected && ordered;

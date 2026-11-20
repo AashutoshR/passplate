@@ -1,3 +1,4 @@
+import { dateFormat } from "./format-cache";
 export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 export type Weekday = (typeof WEEKDAYS)[number];
 
@@ -21,7 +22,7 @@ function toMinutes(hhmm: string): number {
 
 /** Weekday and minutes since midnight in the restaurant's own time zone. */
 export function localClock(timeZone: string, now: Date): { day: Weekday; minutes: number } {
-  const parts = new Intl.DateTimeFormat("en-GB", {
+  const parts = dateFormat("en-GB", {
     timeZone,
     weekday: "short",
     hour: "2-digit",

@@ -64,9 +64,6 @@ export const locations = pgTable("locations", {
   lat: doublePrecision("lat").notNull().default(51.4495),
   lng: doublePrecision("lng").notNull().default(-2.5967),
   targetPrepSeconds: integer("target_prep_seconds").notNull().default(900),
-  nextOrderNumber: integer("next_order_number").notNull().default(1),
-  /** SHA-256 of the kitchen device code. Replaced by staff accounts in Milestone 4. */
-  kitchenTokenHash: text("kitchen_token_hash").notNull(),
   createdAt: createdAt(),
 });
 
@@ -108,6 +105,8 @@ export const menuCategories = pgTable(
     /** One line under the section heading on the menu. */
     blurb: text("blurb"),
     position: integer("position").notNull().default(0),
+    /** Taken off the menu by a manager. Kept because past orders point at it. */
+    archived: boolean("archived").notNull().default(false),
   },
   (t) => [index("menu_categories_location_idx").on(t.locationId, t.position)],
 );
@@ -136,6 +135,8 @@ export const menuItems = pgTable(
     stock: integer("stock"),
     soldOut: boolean("sold_out").notNull().default(false),
     position: integer("position").notNull().default(0),
+    /** Taken off the menu by a manager. Kept because past orders point at it. */
+    archived: boolean("archived").notNull().default(false),
     updatedAt: updatedAt(),
   },
   (t) => [index("menu_items_location_idx").on(t.locationId, t.position)],
@@ -193,6 +194,12 @@ export const orders = pgTable(
     deliveryFeeMinor: integer("delivery_fee_minor").notNull().default(0),
     totalMinor: integer("total_minor").notNull().default(0),
     paidAt: timestamp("paid_at", { withTimezone: true }),
+    /** test or stripe, for orders paid online. */
+    paymentProvider: text("payment_provider"),
+    /** The provider's id for the payment, such as a Stripe PaymentIntent. */
+    paymentRef: text("payment_ref"),
+    /** An unpaid order is cancelled, and its stock released, after this. */
+    paymentExpiresAt: timestamp("payment_expires_at", { withTimezone: true }),
     deliveryLine1: text("delivery_line1"),
     deliveryPostcode: text("delivery_postcode"),
     deliveryLat: doublePrecision("delivery_lat"),
@@ -214,6 +221,10 @@ export const orders = pgTable(
     index("orders_location_created_idx").on(t.locationId, t.createdAt),
     index("orders_user_idx").on(t.userId),
     index("orders_table_idx").on(t.tableId),
+    // Only unpaid orders have an expiry, so this stays tiny. (A predicate on the new
+    // enum value cannot sit in the migration that adds it.)
+    index("orders_unpaid_idx").on(t.paymentExpiresAt).where(sql`${t.paymentExpiresAt} is not null`),
+    uniqueIndex("orders_payment_ref_uq").on(t.paymentRef),
   ],
 );
 
@@ -410,3 +421,69 @@ export const waitlist = pgTable(
   },
   (t) => [index("waitlist_location_status_idx").on(t.locationId, t.status)],
 );
+
+/**
+ * The shared cart of one table (FR-4). Its id is the realtime channel, handed
+ * only to phones holding the table's QR code. Clearing the table deletes it,
+ * so the next party starts with a new id nobody else is listening to.
+ */
+export const tableCarts = pgTable("table_carts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tableId: uuid("table_id")
+    .notNull()
+    .unique()
+    .references(() => diningTables.id, { onDelete: "cascade" }),
+  version: integer("version").notNull().default(0),
+  updatedAt: updatedAt(),
+});
+
+/**
+ * One row per dish added. The id comes from the phone, so a retried add is a
+ * no-op, and two phones adding at once each get their own row: nothing is lost.
+ */
+export const tableCartLines = pgTable(
+  "table_cart_lines",
+  {
+    id: uuid("id").primaryKey(),
+    cartId: uuid("cart_id")
+      .notNull()
+      .references(() => tableCarts.id, { onDelete: "cascade" }),
+    menuItemId: uuid("menu_item_id")
+      .notNull()
+      .references(() => menuItems.id),
+    quantity: integer("quantity").notNull(),
+    modifierIds: uuid("modifier_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    notes: text("notes"),
+    addedBy: text("added_by").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("table_cart_lines_cart_idx").on(t.cartId, t.createdAt)],
+);
+
+/** Staff invite links (FR-22). Only the SHA-256 of the token is stored. */
+export const invites = pgTable(
+  "invites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    locationId: uuid("location_id")
+      .notNull()
+      .references(() => locations.id),
+    role: userRole("role").notNull(),
+    name: text("name"),
+    email: text("email"),
+    tokenHash: text("token_hash").notNull().unique(),
+    createdBy: uuid("created_by").references(() => users.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    usedBy: uuid("used_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index("invites_location_idx").on(t.locationId)],
+);
+
+/** Stripe webhook events already handled (NFR-13). A retry of the same event id does nothing. */
+export const stripeEvents = pgTable("stripe_events", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+});

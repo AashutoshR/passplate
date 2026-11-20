@@ -3,6 +3,8 @@ import { DeliveryAddressSchema } from "./delivery";
 
 export const ORDER_TYPES = ["dine_in", "pickup", "delivery"] as const;
 export const ORDER_STATUSES = [
+  /** Collect and delivery orders wait here until the payment is confirmed (FR-8). The kitchen never sees them. */
+  "awaiting_payment",
   "received",
   "cooking",
   "ready",
@@ -32,10 +34,24 @@ export const PlaceOrderSchema = z
     tableToken: z.string().min(1).max(64).optional(),
     customerName: z.string().trim().min(1).max(60),
     phone: z.string().trim().max(30).optional(),
-    items: z.array(PlaceOrderItemSchema).min(1).max(50),
+    items: z.array(PlaceOrderItemSchema).max(50).default([]),
+    /**
+     * Dine-in from the shared table cart (FR-4): the lines this phone saw. The
+     * server orders exactly those, so a dish someone added a moment later stays
+     * in the cart instead of being sent unseen or lost.
+     */
+    tableCartLineIds: z.array(z.uuid()).min(1).max(100).optional(),
     delivery: DeliveryAddressSchema.optional(),
     /** Spend one earned reward on this order. Needs a signed-in customer. */
     useReward: z.boolean().optional(),
+  })
+  .refine((b) => b.items.length > 0 || Boolean(b.tableCartLineIds), {
+    message: "Add at least one dish",
+    path: ["items"],
+  })
+  .refine((b) => !b.tableCartLineIds || (b.type === "dine_in" && b.items.length === 0), {
+    message: "A table cart order is dine-in and carries no separate items",
+    path: ["tableCartLineIds"],
   })
   .refine((b) => b.type !== "dine_in" || Boolean(b.tableToken), {
     message: "tableToken is required for dine-in orders",
@@ -73,10 +89,22 @@ export const StockUpdateSchema = z
   });
 export type StockUpdateInput = z.infer<typeof StockUpdateSchema>;
 
-export const KitchenLoginSchema = z.object({
-  slug: z.string().min(1).max(64),
-  code: z.string().min(1).max(200),
+/** Adding a dish to the shared table cart. The client picks `lineId`, so a retried add never doubles up. */
+export const CartAddSchema = z.object({
+  lineId: z.uuid(),
+  menuItemId: z.uuid(),
+  quantity: z.number().int().min(1).max(20),
+  modifierIds: z.array(z.uuid()).max(20).default([]),
+  notes: z.string().trim().max(200).optional(),
+  addedBy: z.string().trim().min(1).max(40),
 });
+export type CartAddInput = z.infer<typeof CartAddSchema>;
+
+/** Zero removes the line. */
+export const CartQuantitySchema = z.object({ quantity: z.number().int().min(0).max(50) });
+
+/** The guest's choice on the test-mode payment screen. */
+export const TestPaymentSchema = z.object({ outcome: z.enum(["succeeded", "declined"]) });
 
 /** Idempotency keys are client generated, usually a UUID. */
 export const IdempotencyKeySchema = z

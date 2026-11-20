@@ -14,7 +14,8 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL("../..", import.meta.url))] },
     // Same-origin paths in development, so phones on the Wi-Fi only need one address.
     proxy: {
-      "/api": { target: API, changeOrigin: true, rewrite: (p) => p.replace(/^\/api/, "") },
+      // xfwd passes the browser's address on, so rate limits count each guest, not the proxy.
+      "/api": { target: API, changeOrigin: true, xfwd: true, rewrite: (p) => p.replace(/^\/api/, "") },
       "/ws": { target: GATEWAY, ws: true },
     },
   },

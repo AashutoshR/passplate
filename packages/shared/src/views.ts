@@ -16,6 +16,8 @@ export interface TicketView {
   deliveryFeeMinor: number;
   totalMinor: number;
   paid: boolean;
+  /** Set while a collect or delivery order waits for its payment. */
+  payment: { provider: PaymentProvider; expiresAt: string } | null;
   createdAt: string;
   updatedAt: string;
   items: TicketItemView[];
@@ -111,6 +113,53 @@ export function isAvailable(item: Pick<MenuItemView, "stock" | "soldOut">): bool
   return !item.soldOut && (item.stock === null || item.stock > 0);
 }
 
+/**
+ * Who takes online payments. "stripe" uses Stripe test mode when keys are set;
+ * "test" is a built-in stand-in so the whole flow runs with no account.
+ */
+export const PAYMENT_PROVIDERS = ["test", "stripe"] as const;
+export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
+
+/** What the payment screen needs. Card details go straight to Stripe, never to us. */
+export interface PaymentStartView {
+  provider: PaymentProvider;
+  amountMinor: number;
+  currency: string;
+  expiresAt: string;
+  /** Stripe only. */
+  clientSecret: string | null;
+  publishableKey: string | null;
+}
+
+/** One dish in the shared table cart (FR-4), with who added it. */
+export interface CartLineView {
+  id: string;
+  menuItemId: string;
+  name: string;
+  quantity: number;
+  modifierIds: string[];
+  modifierNames: string[];
+  unitPriceMinor: number;
+  notes: string | null;
+  addedBy: string;
+  createdAt: string;
+}
+
+export interface CartView {
+  cartId: string;
+  tableLabel: string;
+  version: number;
+  lines: CartLineView[];
+  /** Realtime sequence the snapshot is consistent with. */
+  seq: number;
+}
+
+/** Payload of cart.updated. `sent` is set when someone at the table sent dishes to the kitchen. */
+export interface CartEvent {
+  cart: Omit<CartView, "seq">;
+  sent: { orderId: string; number: number; by: string; count: number } | null;
+}
+
 export const PAYMENT_METHODS = ["card", "cash", "online"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
@@ -166,6 +215,38 @@ export interface StaffMemberView {
   role: "staff" | "driver" | "admin";
   createdAt: string;
   lastLoginAt: string | null;
+}
+
+/** The admin's view of the menu, including dishes taken off it. */
+export interface MenuAdminView {
+  currency: string;
+  categories: {
+    id: string;
+    name: string;
+    blurb: string | null;
+    items: (MenuItemView & { categoryId: string; archived: boolean })[];
+  }[];
+  /** Photos already in use or uploaded, to pick from. */
+  photos: string[];
+}
+
+export interface InviteView {
+  id: string;
+  role: "staff" | "driver" | "admin";
+  name: string | null;
+  email: string | null;
+  createdAt: string;
+  expiresAt: string;
+  /** Only returned once, when the invite is created. */
+  url: string | null;
+}
+
+/** What someone opening an invite link sees before choosing a password. */
+export interface InvitePreview {
+  role: "staff" | "driver" | "admin";
+  restaurant: string;
+  name: string | null;
+  email: string | null;
 }
 
 export interface GuestView {

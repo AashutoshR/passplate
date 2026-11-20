@@ -23,12 +23,12 @@ export async function getMenu(db: Db, slug: string, now = new Date()): Promise<M
       const cats = await tx
         .select()
         .from(menuCategories)
-        .where(eq(menuCategories.locationId, loc.id))
+        .where(and(eq(menuCategories.locationId, loc.id), eq(menuCategories.archived, false)))
         .orderBy(asc(menuCategories.position));
       const items = await tx
         .select()
         .from(menuItems)
-        .where(eq(menuItems.locationId, loc.id))
+        .where(and(eq(menuItems.locationId, loc.id), eq(menuItems.archived, false)))
         .orderBy(asc(menuItems.position));
       const itemIds = items.map((i) => i.id);
       const groups = itemIds.length
@@ -97,7 +97,9 @@ export async function getMenu(db: Db, slug: string, now = new Date()): Promise<M
                     .map((m) => ({ id: m.id, name: m.name, priceDeltaMinor: m.priceDeltaMinor })),
                 })),
             })),
-        })),
+        }))
+          // A section whose dishes were all taken off is not shown.
+          .filter((c) => c.items.length > 0),
         seq,
       };
     },

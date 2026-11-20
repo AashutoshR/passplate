@@ -1,0 +1,12 @@
+**/node_modules
+.git
+docs
+var
+load/results
+apps/web/public/media
+apps/web/.output
+apps/web/.tanstack
+apps/api/test
+**/*.log
+.env
+.env.*

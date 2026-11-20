@@ -1,6 +1,6 @@
 import { asc, eq, inArray, max } from "drizzle-orm";
 import { diningTables, orderItems, orders, outbox, users, type Executor } from "@pass/db";
-import type { TicketView } from "@pass/shared";
+import type { PaymentProvider, TicketView } from "@pass/shared";
 
 /** Loads orders with their items as ticket views, in the order of `ids`. */
 export async function loadTickets(db: Executor, ids: string[]): Promise<TicketView[]> {
@@ -34,6 +34,10 @@ export async function loadTickets(db: Executor, ids: string[]): Promise<TicketVi
         deliveryFeeMinor: order.deliveryFeeMinor,
         totalMinor: order.totalMinor,
         paid: order.paidAt !== null,
+        payment:
+          order.status === "awaiting_payment" && order.paymentExpiresAt
+            ? { provider: (order.paymentProvider ?? "test") as PaymentProvider, expiresAt: order.paymentExpiresAt.toISOString() }
+            : null,
         createdAt: order.createdAt.toISOString(),
         updatedAt: order.updatedAt.toISOString(),
         items: [],

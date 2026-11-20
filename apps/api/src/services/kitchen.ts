@@ -3,6 +3,7 @@ import { locations, menuItems, orderItems, orderTransitions, orders, type Db } f
 import { maybeEarnReward } from "./accounts";
 import { tableEvents } from "./floor";
 import { refundOrder } from "./payments";
+import { refundOnline, type PaymentsConfig } from "./checkout";
 import {
   ACTIVE_STATUSES,
   canTransition,
@@ -64,9 +65,11 @@ export async function transitionTicket(
   orderId: string,
   input: TransitionInput,
   actor: string,
+  payments: PaymentsConfig = { provider: "test" },
 ): Promise<TransitionResult> {
+  let refund: { paymentProvider: string | null; paymentRef: string | null } | null = null;
   try {
-    return await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       const [seen] = await tx
         .select({ id: orderTransitions.id })
         .from(orderTransitions)
@@ -106,7 +109,11 @@ export async function transitionTicket(
       const restocked = input.to === "cancelled" ? await restock(tx, loc.id, orderId) : [];
       const extra: OutboxEvent[] = [];
       if (input.to === "completed" || input.to === "delivered") await maybeEarnReward(tx, order.userId, orderId);
-      if (input.to === "cancelled") extra.push(...(await refundOrder(tx, loc, order, null)));
+      if (input.to === "cancelled") {
+        const refunded = await refundOrder(tx, loc, order, null);
+        if (refunded.length > 0) refund = order;
+        extra.push(...refunded);
+      }
       if (order.tableId) extra.push(...(await tableEvents(tx, loc, [order.tableId])));
       const ticket = (await loadTicket(tx, orderId))!;
       if (order.type === "delivery") {
@@ -125,6 +132,9 @@ export async function transitionTicket(
       await enqueue(tx, loc.tenantId, events);
       return { ticket, replayed: false };
     });
+    // Money paid through Stripe goes back through Stripe, once the cancel has committed.
+    if (refund) await refundOnline(payments, refund);
+    return result;
   } catch (err) {
     // Two replays of one action raced: the loser hits the unique actionId.
     if (isUniqueViolation(err)) {
@@ -136,7 +146,7 @@ export async function transitionTicket(
 }
 
 /** A cancelled order gives its counted portions back. */
-async function restock(
+export async function restock(
   tx: Parameters<Parameters<Db["transaction"]>[0]>[0],
   locationId: string,
   orderId: string,

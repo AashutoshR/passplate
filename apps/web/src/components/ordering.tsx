@@ -20,6 +20,7 @@ import { AddressPicker } from "./address";
 import { ApiError, api } from "../lib/api";
 import { useCart, type CartLine } from "../lib/cart";
 import { storage, uuid } from "../lib/ids";
+import { useTableCart, type Sent } from "../lib/table-cart";
 import { useBumpKey } from "../lib/motion";
 import { RealtimeClient, type LinkStatus } from "../lib/realtime";
 import { Logo } from "./brand";
@@ -29,13 +30,103 @@ import { Sheet } from "./sheet";
 export type OrderMode = { type: "pickup"; delivery?: boolean } | { type: "dine_in"; tableToken: string; tableLabel: string };
 export type Fulfil = "dine_in" | "pickup" | "delivery";
 
+/** A line in either basket. At a table it also says who added it. */
+export type BasketLine = CartLine & { addedBy?: string; pending?: boolean };
+
+/** What the menu and the basket need, whether the cart is this phone's own or the table's. */
+export interface CartApi {
+  lines: BasketLine[];
+  add: (line: Omit<CartLine, "key">) => void;
+  setQuantity: (key: string, quantity: number) => void;
+  clear: () => void;
+  count: number;
+  totalMinor: number;
+  quantityOf: (menuItemId: string) => number;
+  /** Where this phone keeps its own basket. Kept until the order is paid. */
+  basketKey?: string;
+  /** Set at a table: the cart everyone there shares (FR-4). */
+  shared?: {
+    me: string;
+    setMe: (name: string) => void;
+    people: string[];
+    sendableIds: string[];
+    sent: Sent | null;
+    dismissSent: () => void;
+    problem: string | null;
+    dismissProblem: () => void;
+    placed: (orderId: string) => void;
+  };
+}
+
 export function OrderingPage({ initialMenu, mode }: { initialMenu: MenuView; mode: OrderMode }) {
+  return mode.type === "dine_in" ? (
+    <TableOrdering initialMenu={initialMenu} mode={mode} />
+  ) : (
+    <TakeawayOrdering initialMenu={initialMenu} mode={mode} />
+  );
+}
+
+/** Collect and delivery: a basket kept on this phone. */
+function TakeawayOrdering({ initialMenu, mode }: { initialMenu: MenuView; mode: OrderMode }) {
+  const basketKey = `pass:cart:${initialMenu.location.id}:pickup`;
+  const cart = useCart(basketKey);
+  return <OrderingView initialMenu={initialMenu} mode={mode} cart={{ ...cart, basketKey }} />;
+}
+
+/** At a table: one live basket for everyone who scanned the same QR code. */
+function TableOrdering({ initialMenu, mode }: { initialMenu: MenuView; mode: Extract<OrderMode, { type: "dine_in" }> }) {
+  const { user } = useAccount();
+  const [me, setMeState] = useState("");
+  const [sent, setSent] = useState<Sent | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const mine = useRef(new Set<string>());
+  const table = useTableCart(mode.tableToken, {
+    // Someone else at the table sent the basket: say so, with a link to follow it.
+    onSent: (s) => !mine.current.has(s.orderId) && setSent(s),
+  });
+
+  useEffect(() => setMeState(storage.get("pass:name", "")), []);
+  useEffect(() => {
+    if (user) setMeState((n) => n || user.name.split(" ")[0]!);
+  }, [user]);
+  const setMe = (name: string) => {
+    setMeState(name);
+    if (name.trim()) storage.set("pass:name", name.trim());
+  };
+
+  const report = (err: unknown) =>
+    setProblem(err instanceof ApiError ? err.message : "No connection. That change was not saved, please try again.");
+
+  const cart: CartApi = {
+    lines: table.lines,
+    add: (line) => void table.add(line, me.trim() || "Guest").catch(report),
+    setQuantity: (key, n) => void table.setQuantity(key, n).catch(report),
+    clear: () => {},
+    count: table.count,
+    totalMinor: table.totalMinor,
+    quantityOf: table.quantityOf,
+    shared: {
+      me,
+      setMe,
+      people: table.people,
+      sendableIds: table.sendableIds,
+      sent,
+      dismissSent: () => setSent(null),
+      problem: problem ?? table.error,
+      dismissProblem: () => setProblem(null),
+      placed: (orderId) => mine.current.add(orderId),
+    },
+  };
+  return <OrderingView initialMenu={initialMenu} mode={mode} cart={cart} />;
+}
+
+function OrderingView({ initialMenu, mode, cart }: { initialMenu: MenuView; mode: OrderMode; cart: CartApi }) {
   const [menu, setMenu] = useState(initialMenu);
   const [link, setLink] = useState<LinkStatus>("connecting");
   const [selected, setSelected] = useState<MenuItemView | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const loc = menu.location;
-  const cart = useCart(`pass:cart:${loc.id}:${mode.type === "dine_in" ? mode.tableToken : "pickup"}`);
+  const shared = cart.shared;
   const money = (minor: number) => formatMoney(minor, loc.currency);
   const bump = useBumpKey(cart.count);
   // Pickup and delivery share one basket; switching keeps what is in it.
@@ -54,7 +145,9 @@ export function OrderingPage({ initialMenu, mode }: { initialMenu: MenuView; mod
   }, []);
 
   const reloadMenu = useCallback(async () => {
-    const fresh = await api<MenuView>(`/v1/locations/${loc.slug}/menu`);
+    // Ask the server, not the browser's copy: the menu may be cached for a few
+    // seconds, and this runs because it just changed. The ETag keeps it cheap.
+    const fresh = await api<MenuView>(`/v1/locations/${loc.slug}/menu`, { cache: "no-cache" });
     setMenu(fresh);
     return fresh.seq;
   }, [loc.slug]);
@@ -64,7 +157,11 @@ export function OrderingPage({ initialMenu, mode }: { initialMenu: MenuView; mod
     const client = new RealtimeClient({
       channels: [channels.menu(loc.id)],
       since: initialMenu.seq,
-      onEvent: (e) => e.type === "menu.item_updated" && applyStock(e.payload as StockChange),
+      onEvent: (e) => {
+        if (e.type === "menu.item_updated") applyStock(e.payload as StockChange);
+        // A manager edited the menu: fetch it again.
+        if (e.type === "menu.changed") void reloadMenu().catch(() => {});
+      },
       onResync: reloadMenu,
       onStatus: setLink,
     });
@@ -135,6 +232,25 @@ export function OrderingPage({ initialMenu, mode }: { initialMenu: MenuView; mod
               {mode.type === "dine_in" ? "What would you like?" : fulfil === "delivery" ? "Dinner, delivered." : "Take us home."}
             </span>
           </h1>
+          {shared && (
+            <div className="fade-up mt-8 flex max-w-xl flex-col gap-4 border-t border-espresso/20 pt-5 sm:flex-row sm:items-end sm:justify-between">
+              <p className="text-umber">
+                Everyone at this table adds to one order, live.
+                {shared.people.length > 0 && <> So far: {shared.people.join(", ")}.</>}
+              </p>
+              <label className="shrink-0">
+                <span className="eyebrow mb-1.5 block text-taupe">Your name</span>
+                <input
+                  id="table-name"
+                  value={shared.me}
+                  onChange={(e) => shared.setMe(e.target.value.slice(0, 40))}
+                  placeholder="So the table knows"
+                  autoComplete="given-name"
+                  className="w-48 border-b border-espresso/40 bg-transparent py-1.5 text-lg text-espresso outline-none placeholder:text-taupe focus:border-espresso"
+                />
+              </label>
+            </div>
+          )}
         </div>
 
         {!loc.isOpen && (
@@ -168,6 +284,30 @@ export function OrderingPage({ initialMenu, mode }: { initialMenu: MenuView; mod
         </p>
       </main>
 
+      {shared?.sent && (
+        <div role="status" className="drop fixed inset-x-0 top-20 z-50 mx-auto w-[min(32rem,calc(100%-2rem))] border border-espresso bg-cream px-5 py-4 shadow-[0_18px_40px_-20px_rgb(23_36_30/0.45)]">
+          <p className="font-serif text-xl leading-snug">
+            {shared.sent.by} sent {shared.sent.count} {shared.sent.count === 1 ? "dish" : "dishes"} to the kitchen.
+          </p>
+          <div className="mt-3 flex items-center gap-5">
+            <Link to="/order/$id" params={{ id: shared.sent.orderId }} className="draw text-espresso">
+              Follow order {shared.sent.number}
+            </Link>
+            <button type="button" onClick={shared.dismissSent} className="eyebrow text-taupe hover:text-espresso">
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+      {shared?.problem && (
+        <div role="alert" className="drop fixed inset-x-0 top-20 z-50 mx-auto flex w-[min(32rem,calc(100%-2rem))] items-start justify-between gap-4 border border-brass bg-cream px-5 py-4">
+          <p>{shared.problem}</p>
+          <button type="button" onClick={shared.dismissProblem} className="eyebrow shrink-0 text-taupe hover:text-espresso">
+            Close
+          </button>
+        </div>
+      )}
+
       {cart.count > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-espresso/15 bg-cream/92 px-5 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-md">
           <button
@@ -179,7 +319,7 @@ export function OrderingPage({ initialMenu, mode }: { initialMenu: MenuView; mod
               <span key={bump} className="tick grid size-7 place-items-center bg-cream text-[0.8rem] text-espresso">
                 {cart.count}
               </span>
-              View your order
+              {shared ? "View the table's order" : "View your order"}
             </span>
             <span className="tabular tracking-normal">{money(cart.totalMinor)}</span>
           </button>
@@ -513,7 +653,7 @@ function CartSheet({
 }: {
   open: boolean;
   onClose: () => void;
-  cart: ReturnType<typeof useCart>;
+  cart: CartApi;
   items: Map<string, MenuItemView>;
   money: (m: number) => string;
   mode: OrderMode;
@@ -545,6 +685,11 @@ function CartSheet({
     setName((n) => n || user.name.split(" ")[0]!);
     setPhone((p) => p || user.phone || "");
   }, [user]);
+  // At a table, the name you add dishes under is the name the order goes under.
+  const sharedName = cart.shared?.me;
+  useEffect(() => {
+    if (open && sharedName) setName(sharedName);
+  }, [open, sharedName]);
 
   const unavailable = cart.lines.filter((l) => {
     const item = items.get(l.menuItemId);
@@ -602,12 +747,17 @@ function CartSheet({
           }
         : {}),
       ...(discount > 0 ? { useReward: true } : {}),
-      items: cart.lines.map((l) => ({
-        menuItemId: l.menuItemId,
-        quantity: l.quantity,
-        modifierIds: l.modifierIds,
-        ...(l.notes ? { notes: l.notes } : {}),
-      })),
+      // At a table, send exactly the dishes on this screen, by id (FR-4).
+      ...(cart.shared
+        ? { tableCartLineIds: cart.shared.sendableIds }
+        : {
+            items: cart.lines.map((l) => ({
+              menuItemId: l.menuItemId,
+              quantity: l.quantity,
+              modifierIds: l.modifierIds,
+              ...(l.notes ? { notes: l.notes } : {}),
+            })),
+          }),
     };
     const fingerprint = JSON.stringify(body);
     if (attempt.current?.fingerprint !== fingerprint) attempt.current = { fingerprint, key: uuid() };
@@ -622,7 +772,11 @@ function CartSheet({
         timeoutMs: 15_000,
       });
       attempt.current = null;
-      cart.clear();
+      cart.shared?.placed(ticket.id);
+      // An order still to be paid keeps its basket until the payment lands,
+      // so going back to change something loses nothing.
+      if (paysNow && cart.basketKey) storage.set("pass:basket-for-order", { orderId: ticket.id, key: cart.basketKey });
+      else cart.clear();
       onClose();
       void refresh();
       await navigate({ to: "/order/$id", params: { id: ticket.id } });
@@ -661,16 +815,16 @@ function CartSheet({
           <button
             type="button"
             onClick={place}
-            disabled={placing || cart.count === 0 || unavailable.length > 0 || Boolean(blocker)}
+            disabled={placing || cart.count === 0 || unavailable.length > 0 || Boolean(blocker) || (cart.shared?.sendableIds.length === 0)}
             className="cta cta-dark w-full justify-between px-5 py-4"
           >
             <span>
-              {placing ? (paysNow ? "Paying…" : "Sending to the kitchen…") : (blocker ?? (paysNow ? "Pay and order" : "Send to the kitchen"))}
+              {placing ? (paysNow ? "Saving your order…" : "Sending to the kitchen…") : (blocker ?? (paysNow ? "Continue to payment" : "Send to the kitchen"))}
             </span>
             <span className="tabular tracking-normal">{money(total)}</span>
           </button>
           <p className="text-center text-sm text-taupe">
-            {mode.type === "dine_in" ? "Pay at the end of your meal." : "Test mode: no card is charged."}
+            {mode.type === "dine_in" ? "Sends the whole table's order. Pay at the end of your meal." : "You pay on the next screen."}
           </p>
         </div>
       }
@@ -688,6 +842,11 @@ function CartSheet({
                   {photo && <DishPhoto src={photo} alt="" className="size-14 shrink-0" />}
                   <div className="min-w-0 flex-1">
                     <p className="font-serif text-xl leading-tight">{l.name}</p>
+                    {l.addedBy && (
+                      <p className="eyebrow mt-1 text-[0.62rem] text-taupe">
+                        {l.pending ? "Adding…" : `Added by ${l.addedBy}`}
+                      </p>
+                    )}
                     {l.modifierNames.length > 0 && <p className="text-sm text-umber">{l.modifierNames.join(", ")}</p>}
                     {l.notes && <p className="text-sm text-umber">“{l.notes}”</p>}
                     {bad && <p className="mt-1 text-sm text-brass">No longer available in this amount</p>}

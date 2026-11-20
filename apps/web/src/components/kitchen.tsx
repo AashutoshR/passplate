@@ -16,10 +16,10 @@ import { storage, uuid } from "../lib/ids";
 import { RealtimeClient, useLatest, useNow, type LinkStatus } from "../lib/realtime";
 import { Logo } from "./brand";
 
+/** The restaurant a signed-in member of staff works at. The session cookie does the rest. */
 export interface KitchenSession {
   locationId: string;
   locationName: string;
-  token: string;
 }
 
 /** A tap waiting to reach the server. Kept on the device so Wi-Fi drops lose nothing (FR-13). */
@@ -72,7 +72,8 @@ export function KitchenBoard({
   onLogout: () => void;
 }) {
   const id = session.locationId;
-  const auth = useMemo(() => ({ Authorization: `Bearer ${session.token}` }), [session.token]);
+  // Same-origin requests carry the staff session cookie; nothing else to send.
+  const auth = useMemo(() => ({}), []);
   const [tickets, setTickets] = useState<Map<string, TicketView>>(new Map());
   const [loc, setLoc] = useState<KitchenSnapshot["location"] | null>(null);
   const [link, setLink] = useState<LinkStatus>("connecting");
@@ -117,7 +118,7 @@ export function KitchenBoard({
 
   const handleAuthError = useCallback(
     (err: unknown) => {
-      if (err instanceof ApiError && err.status === 401) {
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
         logoutRef.current();
         return true;
       }
@@ -136,14 +137,13 @@ export function KitchenBoard({
       try {
         const [seq, menu] = await Promise.all([
           loadSnapshot(),
-          api<MenuView>(`/v1/locations/${encodeURIComponent(slug)}/menu`),
+          api<MenuView>(`/v1/locations/${encodeURIComponent(slug)}/menu`, { cache: "no-cache" }),
         ]);
         if (stopped) return;
         setMenuItems(menu.categories.flatMap((c) => c.items));
         const client = new RealtimeClient({
           channels: [channels.kitchen(id), channels.menu(id)],
           since: Math.min(seq, menu.seq),
-          token: session.token,
           onEvent: (e) => {
             if (e.type === "ticket.created" || e.type === "ticket.updated") {
               const t = e.payload as TicketView;
@@ -177,7 +177,7 @@ export function KitchenBoard({
       clientRef.current?.stop();
       clientRef.current = null;
     };
-  }, [id, slug, session.token, loadSnapshot, applyTicket, handleAuthError, soundRef, logoutRef]);
+  }, [id, slug, loadSnapshot, applyTicket, handleAuthError, soundRef, logoutRef]);
 
   // Send queued taps in order. Network trouble keeps them; a final answer removes them.
   const flushing = useRef(false);

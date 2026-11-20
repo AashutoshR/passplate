@@ -4,6 +4,7 @@ import { localDate, sittingMinutes, zonedTime } from "@pass/shared";
 import type { Db } from "./client";
 import { diningTables, locations, menuItems, orderItems, orders, payments, reservations, rewards, waitlist } from "./schema";
 import type { SeedResult } from "./seed";
+import { setNextOrderNumber } from "./order-numbers";
 
 /**
  * Two weeks of made-up trade for development: past orders with payments, the
@@ -165,6 +166,6 @@ export async function seedSampleActivity(db: Db, seed: SeedResult, now = new Dat
     { locationId: loc.id, name: "Walsh", partySize: 4, quotedMinutes: 25, createdAt: new Date(now.getTime() - 3 * 60_000) },
   ]);
   // New orders carry on numbering after the sample ones.
-  await db.update(locations).set({ nextOrderNumber: number }).where(eq(locations.id, loc.id));
+  await setNextOrderNumber(db, loc.id, number);
   void rewards;
 }

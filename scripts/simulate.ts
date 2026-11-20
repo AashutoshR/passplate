@@ -4,12 +4,15 @@
  * real screen positions and typing with the keyboard, the way people do.
  *
  *   Maya    books a table on her phone from the home page, then cancels it.
- *   Sam     (the demo regular, seven stamps) orders, earns a reward, spends it.
- *   Priya   signs up and orders delivery; Dee, a driver, takes it across town
- *           while Priya watches the rider move on her map.
- *   Marco   runs the floor: seats a walk-in, sees their order arrive live,
- *           settles the bill and resets the table, while Asha (admin) watches
- *           the payment land in the transaction list.
+ *   Sam     (the demo regular, seven stamps) orders, pays, earns a reward, spends it.
+ *   Priya   signs up, orders delivery and pays (one declined card first); Dee,
+ *           a driver, takes it across town while Priya watches the rider move.
+ *   Marco   runs the floor: seats two walk-ins, Lena and Theo, who each scan
+ *           the table's QR code and build one shared order on two phones;
+ *           Theo sends it, Lena is told, Marco sees it arrive, settles the bill
+ *           and resets the table, while Asha (admin) watches the payment land.
+ *   Asha    changes a price in the menu editor; Lena's open menu updates.
+ *   Jo      joins from an invite link Asha made and opens the kitchen screen.
  *   A crowd of 30 guests try to book the same Saturday at the same time.
  *   A sweep checks every public page on a phone and a desktop.
  *
@@ -23,7 +26,7 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEMO_ACCOUNTS, DEMO_KITCHEN_CODE } from "../packages/db/src/seed";
+import { DEMO_ACCOUNTS } from "../packages/db/src/seed";
 
 const WEB = process.env.WEB_URL ?? "http://localhost:3000";
 const API = process.env.API_URL ?? "http://localhost:4000";
@@ -264,8 +267,9 @@ class Persona {
   async signIn(role: keyof typeof DEMO_ACCOUNTS, path = "/account") {
     const a = DEMO_ACCOUNTS[role];
     await this.goto(path);
-    const email = path.startsWith("/staff") ? "#staff-email" : "#account-email";
-    const pass = path.startsWith("/staff") ? "#staff-password" : "#account-password";
+    const staffForm = path.startsWith("/staff") || path.startsWith("/kitchen");
+    const email = staffForm ? "#staff-email" : "#account-email";
+    const pass = staffForm ? "#staff-password" : "#account-password";
     await this.type(`document.querySelector("${email}")`, a.email, "email");
     await this.type(`document.querySelector("${pass}")`, a.password, "password");
     await this.click(`[...document.querySelectorAll("button[type=submit]")].at(-1)`, "Sign in");
@@ -287,15 +291,40 @@ const demo = (await (await fetch(`${API}/v1/dev/demo`)).json()) as {
   tables: { label: string; token: string }[];
 };
 
+/** The kitchen, signed in with its own staff account, moves a ticket along. */
+let kitchenCookie = "";
 async function kitchenMove(orderId: string, path: [string, string][]) {
-  for (const [from, to] of path) {
-    await fetch(`${API}/v1/kitchen/${demo.location.id}/tickets/${orderId}/transition`, {
+  if (!kitchenCookie) {
+    const res = await fetch(`${API}/v1/account/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${DEMO_KITCHEN_CODE}` },
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: DEMO_ACCOUNTS.kitchen.email, password: DEMO_ACCOUNTS.kitchen.password }),
+    });
+    kitchenCookie = res.headers.get("Set-Cookie")!.split(";")[0]!;
+  }
+  for (const [from, to] of path) {
+    const res = await fetch(`${API}/v1/kitchen/${demo.location.id}/tickets/${orderId}/transition`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: kitchenCookie },
       body: JSON.stringify({ from, to, actionId: crypto.randomUUID(), device: "simulated-kitchen" }),
     });
+    if (!res.ok) throw new Error(`the kitchen could not move the ticket to ${to} (${res.status})`);
     await Bun.sleep(500);
   }
+}
+
+/** From the basket to a paid order: continue, then pay on the order page (FR-8). */
+async function checkout(p: Persona, opts: { declineFirst?: boolean } = {}) {
+  await p.click(byText("[role=dialog] button", "Continue to payment"), "Continue to payment");
+  await p.waitFor(`location.pathname.startsWith("/order/")`, "the payment page", 15_000);
+  await p.waitFor(`document.querySelector("#pay-now")`, "the payment form", 10_000);
+  await Bun.sleep(600); // a person reads the screen before tapping
+  if (opts.declineFirst) {
+    await p.click(byText("button", "Try a declined card"), "Try a declined card");
+    await p.waitFor(textHas("Your card was declined"), "the declined message");
+  }
+  await p.click(`document.querySelector("#pay-now")`, "Pay now");
+  await p.waitFor(textHas("The kitchen has your order."), "the kitchen to have the order", 10_000);
 }
 const orderIdFromUrl = async (p: Persona) => (await p.eval<string>("location.pathname")).split("/").pop()!;
 
@@ -362,8 +391,7 @@ async function sam() {
     await p.goto("/r/passplate");
     await addDish(p, "Margherita");
     await p.click(byText("button", "View your order"), "View your order");
-    await p.click(byText("[role=dialog] button", "Pay and order"), "Pay and order");
-    await p.waitFor(`location.pathname.startsWith("/order/")`, "the order page", 12_000);
+    await checkout(p);
   });
   const first = await orderIdFromUrl(p);
   await p.step("the kitchen cooks it and he collects it", async () => {
@@ -381,8 +409,11 @@ async function sam() {
     await p.click(byText("[role=dialog] label", "Use your reward"), "Use your reward");
     await p.waitFor(`[...document.querySelectorAll("[role=dialog] dt")].some((d) => d.textContent === "Reward")`, "the discount line");
     await p.shot("sam-checkout-reward.jpg", "Sam's basket with 20% off");
-    await p.click(byText("[role=dialog] button", "Pay and order"), "Pay and order");
-    await p.waitFor(textHas("Reward"), "the discount on the docket", 12_000);
+    await p.click(byText("[role=dialog] button", "Continue to payment"), "Continue to payment");
+    await p.waitFor(`document.querySelector("#pay-now")`, "the payment form", 15_000);
+    await p.shot("sam-payment.jpg", "Sam's payment step: the kitchen gets the order once it is paid");
+    await p.click(`document.querySelector("#pay-now")`, "Pay now");
+    await p.waitFor(textHas("The kitchen has your order.") + " && " + textHas("Reward"), "the paid order with the discount", 12_000);
   });
   return p;
 }
@@ -421,10 +452,7 @@ async function priyaAndDee() {
     await priya.type(fieldByLabel("House number and street"), "18 Queen Square", "street");
   });
   await priya.shot("priya-checkout.jpg", "Priya's delivery checkout: address, fee and total");
-  await priya.step("pays", async () => {
-    await priya.click(byText("[role=dialog] button", "Pay and order"), "Pay and order");
-    await priya.waitFor(`location.pathname.startsWith("/order/")`, "the order page", 15_000);
-  });
+  await priya.step("pays: her first card is declined, the second goes through", () => checkout(priya, { declineFirst: true }));
   const orderId = await orderIdFromUrl(priya);
 
   await dee.step("signs in on the driver screen", async () => {
@@ -457,6 +485,9 @@ async function priyaAndDee() {
   return [priya, dee];
 }
 
+/** People started inside a journey, so their console errors are checked too. */
+const extra: Persona[] = [];
+
 async function marcoAndAsha() {
   const marco = await new Persona("Marco", WIDE).start();
   const asha = await new Persona("Asha", DESKTOP).start();
@@ -484,23 +515,32 @@ async function marcoAndAsha() {
     await marco.waitFor(`${tableBtn}?.getAttribute("aria-label").includes("Seated")`, "the table to show Seated");
   });
   const token = demo.tables.find((t) => t.label === free)!.token;
-  const menu = await (await fetch(`${API}/v1/locations/passplate/menu`)).json();
-  const find = (n: string) => menu.categories.flatMap((c: any) => c.items).find((i: any) => i.name === n);
-  const res = await fetch(`${API}/v1/orders`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
-    body: JSON.stringify({
-      locationSlug: "passplate",
-      type: "dine_in",
-      tableToken: token,
-      customerName: "Walk-in",
-      items: [
-        { menuItemId: find("Cacio e pepe").id, quantity: 1 },
-        { menuItemId: find("Aperol spritz").id, quantity: 2 },
-      ],
-    }),
+  // Lena and Theo each scan the table's QR code and build one order (FR-4).
+  const lena = await new Persona("Lena", PHONE).start();
+  const theo = await new Persona("Theo", PHONE).start();
+  extra.push(lena, theo);
+  for (const [guest, name] of [[lena, "Lena"], [theo, "Theo"]] as const) {
+    await guest.step(`scans the QR code at ${free} and gives her name`.replace("her", name === "Theo" ? "his" : "her"), async () => {
+      await guest.goto(`/t/${token}`);
+      await guest.waitFor(textHas("Everyone at this table adds to one order"), "the shared order note");
+      await guest.type(`document.querySelector("#table-name")`, name, "name");
+    });
+  }
+  await lena.step("adds Cacio e pepe", () => addDish(lena, "Cacio e pepe"));
+  await theo.step("adds an Aperol spritz", () => addDish(theo, "Aperol spritz"));
+  await theo.step("sees Lena's dish in the table's order, live", async () => {
+    await theo.waitFor(textHas("So far: Lena, Theo") + " || " + textHas("So far: Theo, Lena"), "both names at the table", 8000);
+    await theo.click(byText("button", "View the table's order"), "View the table's order");
+    await theo.waitFor(`${textHas("Added by Lena")} && ${textHas("Added by Theo")}`, "both dishes, with who added them", 8000);
   });
-  const ticket = await res.json();
+  await theo.shot("theo-table-cart.jpg", "Theo's phone: one order for the table, with who added what");
+  await theo.step("sends the whole table's order to the kitchen", async () => {
+    await theo.click(byText("[role=dialog] button", "Send to the kitchen"), "Send to the kitchen");
+    await theo.waitFor(`location.pathname.startsWith("/order/")`, "his order page", 12_000);
+  });
+  await lena.step("is told Theo sent it, without reloading", () => lena.waitFor(textHas("Theo sent 2 dishes to the kitchen"), "the sent note", 10_000));
+  await lena.shot("lena-sent.jpg", "Lena's phone: Theo sent the table's order");
+  const ticket = { id: await orderIdFromUrl(theo) };
   await marco.step("sees the guests' QR order arrive without reloading", () =>
     marco.waitFor(`${tableBtn}?.getAttribute("aria-label").includes("Food on the way")`, "Food on the way", 8000),
   );
@@ -523,6 +563,44 @@ async function marcoAndAsha() {
     await asha.waitFor(`${textHas("Takings, last 14 days")} && document.querySelectorAll("svg[role=img] path").length > 0`, "the overview chart", 10_000);
   });
   await asha.shot("asha-overview.jpg", "Asha's overview");
+  await asha.step("raises the Tiramisu price in the menu editor", async () => {
+    await asha.goto("/staff/admin?tab=menu");
+    await asha.waitFor(textHas("Sections"), "the menu editor");
+    const menu = await (await fetch(`${API}/v1/locations/passplate/menu`)).json();
+    const section = menu.categories.find((c: any) => c.items.some((i: any) => i.name === "Tiramisu")).name;
+    await asha.click(byText("aside li button", section), section);
+    await asha.click(`[...document.querySelectorAll("section li button")].find((b) => b.textContent.includes("Tiramisu"))`, "Tiramisu");
+    await asha.waitFor(`document.querySelector("[role=dialog]")`, "the dish editor");
+    await asha.type(fieldByLabel("Price (£)"), "7.75", "price");
+    await asha.shot("asha-menu-editor.jpg", "Asha's menu editor: a dish with its photo, price, allergens and choices");
+    await asha.click(`[...document.querySelectorAll("[role=dialog] button")].find((b) => b.textContent.trim() === "Save")`, "Save");
+    await asha.waitFor(textHas("Tiramisu saved."), "the saved note");
+  });
+  await lena.step("sees the new price on her open menu, without reloading", () =>
+    lena.waitFor(`[...document.querySelectorAll("main li")].some((li) => li.textContent.includes("Tiramisu") && li.textContent.includes("£7.75"))`, "£7.75 for Tiramisu", 10_000),
+  );
+  let inviteUrl = "";
+  await asha.step("makes an invite link for a new kitchen hand", async () => {
+    await asha.goto("/staff/admin?tab=team");
+    await asha.type(`document.querySelector("input[aria-label='Their name']")`, "Jo", "name");
+    await asha.click(byText("button", "Make an invite link"), "Make an invite link");
+    await asha.waitFor(`document.querySelector("#invite-url")`, "the link");
+    inviteUrl = await asha.eval<string>(`document.querySelector("#invite-url").textContent.trim()`);
+  });
+  const jo = await new Persona("Jo", PHONE).start();
+  extra.push(jo);
+  await jo.step("opens the invite, chooses a password and is signed in", async () => {
+    await jo.goto(new URL(inviteUrl).pathname);
+    await jo.waitFor(textHas("Welcome to the team."), "the invite page");
+    await jo.type(`document.querySelector("#join-email")`, `jo.${Date.now()}@passplate.test`, "email");
+    await jo.type(`document.querySelector("#join-password")`, "a-long-kitchen-password", "password");
+    await jo.click(byText("button[type=submit]", "Join"), "Join");
+    await jo.waitFor(`location.pathname === "/staff"`, "the staff home", 12_000);
+  });
+  await jo.step("opens the kitchen screen with that account", async () => {
+    await jo.goto("/kitchen/passplate");
+    await jo.waitFor(textHas("Stock"), "the kitchen board", 12_000);
+  });
   await marco.step("resets the table", async () => {
     await marco.click(byText("aside button", "Table is reset and ready"), "Table is reset and ready");
     await marco.waitFor(`${tableBtn}?.getAttribute("aria-label").includes("Free")`, "Free again");
@@ -538,27 +616,29 @@ async function crowd() {
   const date = d.toISOString().slice(0, 10);
   const floor = await (await fetch(`${API}/v1/dev/demo`)).json();
   void floor;
+  // Thirty different people, so thirty different addresses (TEST-NET-3, never routed).
   const results = await Promise.all(
     Array.from({ length: 30 }, (_, i) =>
       fetch(`${API}/v1/reservations`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Forwarded-For": `203.0.113.${i + 1}` },
         body: JSON.stringify({ locationSlug: "passplate", date, time: "20:00", party: 4, name: `Crowd ${i + 1}`, phone: "07700 900999" }),
       }).then(async (r) => ({ status: r.status, body: await r.json() })),
     ),
   );
   const ok = results.filter((r) => r.status === 201);
+  const limited = results.filter((r) => r.status === 429).length;
   const tables = new Set(ok.map((r) => r.body.tableLabel));
   const ms = Math.round(performance.now() - t);
   const avail = await (await fetch(`${API}/v1/locations/passplate/availability?date=${date}&party=4`)).json();
   const stillFree = avail.slots.find((s: any) => s.time === "20:00")?.available;
-  const pass = ok.length === tables.size && !stillFree;
+  const pass = ok.length === tables.size && !stillFree && limited === 0;
   steps.push({
     persona: "Crowd",
     step: `30 guests book Saturday ${date} at 20:00 for four at the same moment`,
     ok: pass,
     ms,
-    note: `${ok.length} booked, each on a different table (${[...tables].join(", ")}); ${results.length - ok.length} were told it had just been taken; 20:00 now shows as ${stillFree ? "free (wrong)" : "full"}.`,
+    note: `${ok.length} booked, each on a different table (${[...tables].join(", ")}); ${results.length - ok.length - limited} were told it had just been taken${limited ? `; ${limited} were rate limited` : ""}; 20:00 now shows as ${stillFree ? "free (wrong)" : "full"}.`,
   });
   console.log(`  ${pass ? "ok  " : "FAIL"} Crowd: ${ok.length} of 30 booked on ${tables.size} tables`);
 }
@@ -613,7 +693,7 @@ for (const run of [maya, sam]) {
 }
 const pair1 = await priyaAndDee().catch((e) => (console.log(e), []));
 const pair2 = await marcoAndAsha().catch((e) => (console.log(e), []));
-people.push(...pair1, ...pair2);
+people.push(...pair1, ...pair2, ...extra);
 await crowd();
 const sweepRows = await sweep();
 for (const p of people) {

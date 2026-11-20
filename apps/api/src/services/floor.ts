@@ -14,6 +14,7 @@ import { enqueue, type OutboxEvent } from "../outbox";
 import { currentSeq } from "../views";
 import { reservationsForDay, reservationView } from "./booking";
 import { recordPayment } from "./payments";
+import { dropCart } from "./cart";
 
 type Location = typeof locations.$inferSelect;
 
@@ -251,6 +252,8 @@ export async function clearTable(db: Db, loc: Location, tableId: string): Promis
       .update(diningTables)
       .set({ state: "free", seatedAt: null, seatedParty: null, seatedName: null, reservationId: null })
       .where(eq(diningTables.id, t.id));
+    // The next party gets a fresh cart that the last one is not listening to.
+    await dropCart(tx, t.id);
     const events = await tableEvents(tx, loc, [t.id]);
     events.push({ channel: channels.availability(loc.id), type: "availability.changed", payload: { date: localDate(loc.timezone) } });
     await enqueue(tx, loc.tenantId, events);

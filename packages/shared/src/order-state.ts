@@ -5,6 +5,9 @@ import type { OrderStatus, OrderType } from "./schemas";
  * through canTransition, on the server and in the kitchen UI.
  */
 const TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
+  // Only a confirmed payment (to received) or an expired one (to cancelled)
+  // moves an order on from here, never a tap on a kitchen screen.
+  awaiting_payment: [],
   received: ["cooking", "cancelled"],
   cooking: ["ready", "cancelled"],
   ready: ["completed", "out_for_delivery"],

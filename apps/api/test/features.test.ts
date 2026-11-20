@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { DEMO_ACCOUNTS, createDb, orders, payments, runMigrations, seedDemo } from "@pass/db";
+import { DEMO_ACCOUNTS, createDb, orders, payments, seedDemo, type DemoAccount } from "@pass/db";
 import {
   localDate,
   type AvailabilityView,
@@ -11,9 +11,9 @@ import {
   type TransactionsView,
 } from "@pass/shared";
 import { createApp } from "../src/app";
+import { testDatabaseUrl } from "./containers";
 
-const TEST_URL = process.env.TEST_DATABASE_URL ?? "postgres://pass:pass@localhost:5433/pass_test";
-await runMigrations(TEST_URL);
+const TEST_URL = await testDatabaseUrl();
 const { db, sql: pg } = createDb({ url: TEST_URL, max: 20, appName: "pass-test-features" });
 const app = createApp({ db, log: false });
 
@@ -22,6 +22,7 @@ let menu: MenuView;
 
 beforeEach(async () => {
   seed = await seedDemo(db);
+  kitchenCookie = "";
   menu = await (await app.request(`/v1/locations/${seed.locationSlug}/menu`)).json();
 });
 afterAll(async () => {
@@ -34,7 +35,7 @@ const item = (name: string) => {
 };
 
 /** Signs in and returns a Cookie header for later requests. */
-async function signIn(role: keyof typeof DEMO_ACCOUNTS): Promise<string> {
+async function signIn(role: DemoAccount): Promise<string> {
   const a = DEMO_ACCOUNTS[role];
   const res = await app.request("/v1/account/login", {
     method: "POST",
@@ -57,16 +58,31 @@ function call(path: string, init: { method?: string; body?: unknown; cookie?: st
   });
 }
 
-function placeOrder(body: Record<string, unknown>, cookie?: string) {
-  return call("/v1/orders", {
+/**
+ * Places an order. Collect and delivery orders are then paid with the test
+ * provider (unless `unpaid`), so the response is the order the kitchen sees.
+ */
+async function placeOrder(body: Record<string, unknown>, cookie?: string, opts: { unpaid?: boolean } = {}) {
+  const res = await call("/v1/orders", {
     body: { locationSlug: seed.locationSlug, type: "pickup", customerName: "Sam", ...body },
     cookie,
     key: crypto.randomUUID(),
   });
+  if (res.status !== 201 || body.type === "dine_in" || opts.unpaid) return res;
+  const placed = (await res.json()) as TicketView;
+  const paid = await call(`/v1/orders/${placed.id}/payment/test`, { body: { outcome: "succeeded" } });
+  expect(paid.status).toBe(200);
+  return new Response(await paid.text(), { status: 201, headers: { "Content-Type": "application/json" } });
+}
+
+let kitchenCookie = "";
+async function kitchen() {
+  kitchenCookie ||= await signIn("kitchen");
+  return { "Content-Type": "application/json", Cookie: kitchenCookie };
 }
 
 async function finish(orderId: string, type: "pickup" | "dine_in" = "pickup") {
-  const headers = { "Content-Type": "application/json", Authorization: "Bearer demo-kitchen" };
+  const headers = await kitchen();
   for (const [from, to] of [
     ["received", "cooking"],
     ["cooking", "ready"],
@@ -82,10 +98,10 @@ async function finish(orderId: string, type: "pickup" | "dine_in" = "pickup") {
   void type;
 }
 
-/** A bookable day: at least two days out and not a Monday. */
+/** A bookable day with late hours: at least two days out, not a Monday (closed) or a Sunday (shuts at 21:00). */
 function bookableDate(): string {
   const d = new Date(Date.now() + 2 * 86_400_000);
-  while (d.getUTCDay() === 1) d.setUTCDate(d.getUTCDate() + 1);
+  while (d.getUTCDay() === 1 || d.getUTCDay() === 0) d.setUTCDate(d.getUTCDate() + 1);
   return localDate("Europe/London", d);
 }
 
@@ -276,7 +292,7 @@ describe("floor", () => {
     const t = (await (await placeOrder({ items: [{ menuItemId: item("Fries").id, quantity: 1 }] })).json()) as TicketView;
     await app.request(`/v1/kitchen/${seed.locationId}/tickets/${t.id}/transition`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer demo-kitchen" },
+      headers: await kitchen(),
       body: JSON.stringify({ from: "received", to: "cancelled", actionId: crypto.randomUUID() }),
     });
     const rows = await db.select().from(payments).where(eq(payments.orderId, t.id));
@@ -315,11 +331,11 @@ describe("delivery", () => {
         items: [{ menuItemId: steak.id, quantity: 1, modifierIds: [steak.modifierGroups[0]!.modifiers[0]!.id] }],
       })
     ).json()) as TicketView;
-    const kitchen = { "Content-Type": "application/json", Authorization: "Bearer demo-kitchen" };
+    const headers = await kitchen();
     for (const [from, to] of [["received", "cooking"], ["cooking", "ready"]]) {
       await app.request(`/v1/kitchen/${seed.locationId}/tickets/${t.id}/transition`, {
         method: "POST",
-        headers: kitchen,
+        headers,
         body: JSON.stringify({ from, to, actionId: crypto.randomUUID() }),
       });
     }

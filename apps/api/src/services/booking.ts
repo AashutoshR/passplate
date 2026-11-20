@@ -158,7 +158,11 @@ export async function bookTable(
   opts: { userId?: string | null; source?: "online" | "phone" | "walk_in"; now?: Date; skipLead?: boolean } = {},
 ): Promise<ReservationView> {
   const now = opts.now ?? new Date();
-  for (let attempt = 0; attempt < 4; attempt++) {
+  // A guest who loses a race tries the next free table. With thirty people
+  // pressing "book" at once for ten tables, losing several times in a row is
+  // normal, so there are enough attempts to reach every table.
+  for (let attempt = 0; attempt < 16; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, Math.random() * 15 * Math.min(attempt, 4)));
     try {
       return await db.transaction(async (tx) => {
         const loc = await loadLocation(tx, input.locationSlug);
@@ -205,8 +209,10 @@ export async function bookTable(
         return view;
       });
     } catch (err) {
-      // Lost a race for a table, or a code collided: try again with fresh data.
-      if (isOverlap(err) || (err as { code?: string })?.code === "23505") continue;
+      // Lost a race for a table, a code collided, or two bookings waiting on
+      // each other's uncommitted rows were broken up by Postgres (deadlock).
+      // All mean the same: try again with fresh data.
+      if (isOverlap(err) || ["23505", "40P01", "40001"].includes(pgCode(err) ?? "")) continue;
       throw err;
     }
   }
@@ -284,4 +290,15 @@ export async function reservationsForDay(db: Executor, loc: Location, date: stri
     )
     .orderBy(asc(reservations.startsAt));
   return rows.map(({ r, tableLabel }) => reservationView(r, tableLabel));
+}
+
+/** The Postgres error code, looking through Drizzle's wrapping. */
+function pgCode(err: unknown): string | undefined {
+  let e: unknown = err;
+  for (let i = 0; i < 4 && e; i++) {
+    const code = (e as { code?: string }).code;
+    if (typeof code === "string") return code;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return undefined;
 }

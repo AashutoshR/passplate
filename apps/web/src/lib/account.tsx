@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AccountView, RewardsView, UserView } from "@pass/shared";
-import { api } from "./api";
+import { ApiError, api } from "./api";
 
 interface AccountState {
   user: UserView | null;
@@ -24,12 +24,19 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   });
 
   const refresh = useCallback(async () => {
-    try {
-      const me = await api<AccountView | { user: null; rewards: null }>("/v1/account/me");
-      setState({ user: me.user, rewards: me.rewards, ready: true });
-    } catch {
-      setState((s) => ({ ...s, ready: true }));
+    // A dropped connection is not a sign-out: try a few times before showing
+    // a member of staff the sign-in form in the middle of service.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const me = await api<AccountView | { user: null; rewards: null }>("/v1/account/me", { cache: "no-store" });
+        setState({ user: me.user, rewards: me.rewards, ready: true });
+        return;
+      } catch (err) {
+        if (err instanceof ApiError && err.status < 500 && err.status !== 429) break;
+        await new Promise((r) => setTimeout(r, 400 * 2 ** attempt));
+      }
     }
+    setState((s) => ({ ...s, ready: true }));
   }, []);
 
   useEffect(() => {

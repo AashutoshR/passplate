@@ -7,7 +7,6 @@ export interface RealtimeOptions {
   channels: string[];
   /** Sequence of the snapshot the page already shows. */
   since: number;
-  token?: string;
   onEvent: (event: EventEnvelope) => void;
   /** Reload the snapshot and return its seq. Called when replay is not possible. */
   onResync: () => Promise<number>;
@@ -77,7 +76,7 @@ export class RealtimeClient {
 
   private subscribe() {
     this.ws?.send(
-      JSON.stringify({ op: "subscribe", channels: this.o.channels, since: this.lastSeq, token: this.o.token }),
+      JSON.stringify({ op: "subscribe", channels: this.o.channels, since: this.lastSeq }),
     );
   }
 

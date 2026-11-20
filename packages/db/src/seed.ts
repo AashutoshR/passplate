@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { ALWAYS_OPEN, type OpeningHours } from "@pass/shared";
 import type { Db } from "./client";
+import { createOrderNumberSequence, dropOrderNumberSequences } from "./order-numbers";
 import {
   diningTables,
   locations,
@@ -13,19 +14,18 @@ import {
   users,
 } from "./schema";
 
-/** Development only. Real kitchens sign in with staff accounts from Milestone 4. */
-export const DEMO_KITCHEN_CODE = "demo-kitchen";
-
 /**
  * Development accounts, one per role. Test values only: never reuse them
  * anywhere real. The .test domain is reserved and cannot receive mail.
  */
 export const DEMO_ACCOUNTS = {
-  admin: { email: "admin@passplate.test", password: "passplate-admin", name: "Asha Patel" },
-  staff: { email: "floor@passplate.test", password: "passplate-floor", name: "Marco Rossi" },
-  driver: { email: "driver@passplate.test", password: "passplate-driver", name: "Dee Okafor" },
-  customer: { email: "guest@passplate.test", password: "passplate-guest", name: "Sam Carter" },
+  admin: { email: "admin@passplate.test", password: "passplate-admin", name: "Asha Patel", role: "admin" },
+  staff: { email: "floor@passplate.test", password: "passplate-floor", name: "Marco Rossi", role: "staff" },
+  kitchen: { email: "kitchen@passplate.test", password: "passplate-kitchen", name: "Kitchen pass", role: "staff" },
+  driver: { email: "driver@passplate.test", password: "passplate-driver", name: "Dee Okafor", role: "driver" },
+  customer: { email: "guest@passplate.test", password: "passplate-guest", name: "Sam Carter", role: "customer" },
 } as const;
+export type DemoAccount = keyof typeof DEMO_ACCOUNTS;
 
 /** The hours guests can book a table. Monday closed. */
 export const BOOKING_HOURS: OpeningHours = {
@@ -484,7 +484,6 @@ const MENU: { category: string; blurb: string; items: SeedItem[] }[] = [
 ];
 
 export interface SeedOptions {
-  kitchenCode?: string;
   openingHours?: OpeningHours;
   slug?: string;
 }
@@ -500,10 +499,11 @@ export interface SeedResult {
 /** Wipes all data and creates one demo restaurant. */
 export async function seedDemo(db: Db, opts: SeedOptions = {}): Promise<SeedResult> {
   await db.execute(sql`
-    truncate table outbox, payments, rewards, sessions, waitlist, reservations, order_transitions,
+    truncate table outbox, stripe_events, invites, table_cart_lines, table_carts, payments, rewards, sessions, waitlist, reservations, order_transitions,
       order_items, orders, users, modifiers, modifier_groups, menu_items, menu_categories, dining_tables,
       locations, tenants restart identity cascade
   `);
+  await dropOrderNumberSequences(db);
   const hashes = await hashDemoPasswords();
 
   return db.transaction(async (tx) => {
@@ -522,10 +522,10 @@ export async function seedDemo(db: Db, opts: SeedOptions = {}): Promise<SeedResu
         lat: 51.4497,
         lng: -2.5966,
         targetPrepSeconds: 15 * 60,
-        kitchenTokenHash: hashToken(opts.kitchenCode ?? DEMO_KITCHEN_CODE),
       })
       .returning();
     const locationId = location!.id;
+    await createOrderNumberSequence(tx, locationId);
 
     const tables = await tx
       .insert(diningTables)
@@ -541,20 +541,25 @@ export async function seedDemo(db: Db, opts: SeedOptions = {}): Promise<SeedResu
     const accountRows = await tx
       .insert(users)
       .values(
-        (Object.keys(DEMO_ACCOUNTS) as (keyof typeof DEMO_ACCOUNTS)[]).map((role) => ({
-          email: DEMO_ACCOUNTS[role].email,
-          name: DEMO_ACCOUNTS[role].name,
-          passwordHash: hashes[role],
-          role,
-          phone: role === "customer" ? "07700 900123" : null,
-          locationId: role === "customer" ? null : locationId,
-        })),
+        (Object.keys(DEMO_ACCOUNTS) as DemoAccount[]).map((key) => {
+          const a = DEMO_ACCOUNTS[key];
+          return {
+            email: a.email,
+            name: a.name,
+            passwordHash: hashes[key],
+            role: a.role,
+            phone: a.role === "customer" ? "07700 900123" : null,
+            locationId: a.role === "customer" ? null : locationId,
+          };
+        }),
       )
-      .returning({ id: users.id, role: users.role });
-    const userIds = Object.fromEntries(accountRows.map((u) => [u.role, u.id])) as Record<
-      keyof typeof DEMO_ACCOUNTS,
-      string
-    >;
+      .returning({ id: users.id, email: users.email });
+    const userIds = Object.fromEntries(
+      (Object.keys(DEMO_ACCOUNTS) as DemoAccount[]).map((key) => [
+        key,
+        accountRows.find((u) => u.email === DEMO_ACCOUNTS[key].email)!.id,
+      ]),
+    ) as Record<DemoAccount, string>;
 
     for (const [cIndex, section] of MENU.entries()) {
       const [category] = await tx

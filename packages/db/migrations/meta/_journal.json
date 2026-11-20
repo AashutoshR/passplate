@@ -22,6 +22,20 @@
       "when": 1795123488136,
       "tag": "0002_accounts_booking_delivery",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795158212808,
+      "tag": "0003_payments_cart_menu_invites",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795163103082,
+      "tag": "0004_order_number_sequences",
+      "breakpoints": true
     }
   ]
 }

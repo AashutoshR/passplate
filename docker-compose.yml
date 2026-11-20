@@ -30,5 +30,81 @@ services:
       timeout: 3s
       retries: 30
 
+  # NFR-14: the API reaches Postgres through PgBouncer in transaction mode, so
+  # thousands of client connections share a few dozen server connections.
+  # The relay and gateway use LISTEN and session state, so they connect direct.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: pass
+      DB_PASSWORD: pass
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "4000"
+      DEFAULT_POOL_SIZE: "40"
+      MAX_DB_CONNECTIONS: "80"
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,options
+    ports:
+      - "6433:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 5432"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # A stand-in for the CDN (NFR-17, NFR-18), for load tests and to see caching
+  # locally: `docker compose --profile edge up -d edge`, then open :8080. It
+  # caches what the API marks public (the menu for seconds, photos for a year)
+  # and passes everything else through, including WebSockets.
+  edge:
+    image: nginx:1.27-alpine
+    profiles: ["edge"]
+    ports:
+      - "8080:80"
+    volumes:
+      - ./infra/edge/nginx.conf:/etc/nginx/nginx.conf:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # The production shape, for load tests (TEST-4): several API copies in
+  # Linux containers on the same network as PgBouncer and Redis, behind a
+  # load-balancing edge on :8090. Start with
+  #   RATE_LIMIT=off docker compose --profile cluster up -d --build --scale api=4
+  # The relay and gateway keep running from `bun run dev`.
+  api:
+    build: .
+    image: passplate:dev
+    profiles: ["cluster"]
+    environment:
+      # Through PgBouncer by default; API_DB_POOL_URL= (empty) connects straight to Postgres.
+      DATABASE_POOL_URL: ${API_DB_POOL_URL-postgres://pass:pass@pgbouncer:5432/pass}
+      DB_POOL_MAX: ${API_DB_POOL_MAX:-20}
+      DATABASE_URL: postgres://pass:pass@postgres:5432/pass
+      REDIS_URL: redis://redis:6379
+      RATE_LIMIT: ${RATE_LIMIT:-on}
+      TRUST_PROXY: "1"
+      UPLOAD_DIR: /tmp/uploads
+      NODE_ENV: development
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  edge-cluster:
+    image: nginx:1.27-alpine
+    profiles: ["cluster"]
+    ports:
+      - "8090:80"
+    volumes:
+      - ./infra/edge/nginx.cluster.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+
 volumes:
   pgdata: {}

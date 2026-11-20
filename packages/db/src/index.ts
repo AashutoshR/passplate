@@ -1,4 +1,5 @@
 export * from "./schema";
 export * from "./client";
 export { runMigrations } from "./migrate-lib";
-export { seedDemo, DEMO_KITCHEN_CODE, DEMO_ACCOUNTS, BOOKING_HOURS, hashToken } from "./seed";
+export * from "./order-numbers";
+export { seedDemo, DEMO_ACCOUNTS, BOOKING_HOURS, hashToken, type DemoAccount } from "./seed";

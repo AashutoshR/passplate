@@ -158,7 +158,7 @@ function StaffSignIn() {
           <span>{busy ? "Signing in…" : "Sign in"}</span>
         </button>
       </form>
-      <p className="mt-6 text-sm text-taupe">Accounts are created by an admin. Ask your manager if you do not have one.</p>
+      <p className="mt-6 text-sm text-taupe">New to the team? Ask your manager for an invite link.</p>
     </main>
   );
 }

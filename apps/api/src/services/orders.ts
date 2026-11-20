@@ -1,6 +1,8 @@
 import { and, asc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import {
   diningTables,
+  nextOrderNumber,
+  tableCartLines,
   locations,
   menuItems,
   modifierGroups,
@@ -24,10 +26,12 @@ import {
   rewardDiscount,
   type PlaceOrderInput,
   type StockChange,
+  type CartEvent,
   type TicketView,
 } from "@pass/shared";
+import { lockCart, publishCart } from "./cart";
+import { PAYMENT_WINDOW_MS, type PaymentsConfig } from "./checkout";
 import { tableEvents } from "./floor";
-import { recordPayment } from "./payments";
 import { AppError, isUniqueViolation } from "../errors";
 import { enqueue, type OutboxEvent } from "../outbox";
 import { sha256, stableStringify } from "../util";
@@ -41,9 +45,15 @@ export interface PlaceOrderResult {
 
 class DuplicateKey extends Error {}
 
+type PlaceItem = PlaceOrderInput["items"][number];
+
 /**
- * FR-4 to FR-7. One transaction: validate prices server side, take stock with
+ * FR-4 to FR-8. One transaction: validate prices server side, take stock with
  * conditional updates, number the order, insert it and its outbox events.
+ *
+ * Dine-in goes straight to the kitchen and is settled at the table. Collect
+ * and delivery wait in awaiting_payment, stock held, until the payment is
+ * confirmed (see checkout.ts); only then does the kitchen see a ticket.
  */
 export async function placeOrder(
   db: Db,
@@ -51,6 +61,7 @@ export async function placeOrder(
   idempotencyKey: string,
   now = new Date(),
   userId: string | null = null,
+  payments: PaymentsConfig = { provider: "test" },
 ): Promise<PlaceOrderResult> {
   const requestHash = sha256(stableStringify(input));
   const [loc] = await db.select().from(locations).where(eq(locations.slug, input.locationSlug));
@@ -64,13 +75,15 @@ export async function placeOrder(
   }
 
   let tableId: string | null = null;
+  let tableLabel = "";
   if (input.type === "dine_in") {
     const [table] = await db
-      .select({ id: diningTables.id })
+      .select({ id: diningTables.id, label: diningTables.label })
       .from(diningTables)
       .where(and(eq(diningTables.qrToken, input.tableToken!), eq(diningTables.locationId, loc.id)));
     if (!table) throw new AppError(404, "table_not_found", "This table code is not valid");
     tableId = table.id;
+    tableLabel = table.label;
   }
 
   let fee = 0;
@@ -84,9 +97,37 @@ export async function placeOrder(
   }
   if (input.useReward && !userId) throw new AppError(401, "signed_out", "Sign in to use a reward");
 
+  // The order number comes from the restaurant's own sequence, outside the
+  // order's transaction. It used to be a counter row updated inside it, and
+  // the first load test at 50 orders a second queued every order behind that
+  // one row lock. A failed attempt can skip a number, which is harmless for a
+  // number the kitchen calls out.
+  const orderNumber = await nextOrderNumber(db, loc.id);
+
   try {
     return await db.transaction(async (tx) => {
-      const lines = await priceLines(tx, loc.id, input);
+      // FR-4: from the shared cart, order exactly the lines this phone saw and
+      // take them out of the cart in the same transaction.
+      let items: PlaceItem[] = input.items;
+      let cart: { id: string; version: number } | null = null;
+      if (input.tableCartLineIds && tableId) {
+        cart = await lockCart(tx, tableId);
+        const rows = await tx
+          .delete(tableCartLines)
+          .where(and(eq(tableCartLines.cartId, cart.id), inArray(tableCartLines.id, input.tableCartLineIds)))
+          .returning();
+        if (rows.length === 0) {
+          throw new AppError(409, "cart_already_sent", "Someone at your table has already sent these to the kitchen");
+        }
+        rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
+        items = rows.map((r) => ({
+          menuItemId: r.menuItemId,
+          quantity: r.quantity,
+          modifierIds: r.modifierIds,
+          ...(r.notes ? { notes: r.notes } : {}),
+        }));
+      }
+      const lines = await priceItems(tx, loc.id, items);
       const stockChanges = await takeStock(tx, loc.id, lines);
 
       const subtotal = lines.reduce((sum, l) => sum + l.lineTotalMinor, 0);
@@ -112,19 +153,18 @@ export async function placeOrder(
         discount = rewardDiscount(subtotal);
       }
 
-      const [counter] = await tx
-        .update(locations)
-        .set({ nextOrderNumber: sql`${locations.nextOrderNumber} + 1` })
-        .where(eq(locations.id, loc.id))
-        .returning({ next: locations.nextOrderNumber });
+      const paysOnline = input.type !== "dine_in";
 
       const inserted = await tx
         .insert(orders)
         .values({
           tenantId: loc.tenantId,
           locationId: loc.id,
-          number: counter!.next - 1,
+          number: orderNumber,
           type: input.type,
+          status: paysOnline ? "awaiting_payment" : "received",
+          paymentProvider: paysOnline ? payments.provider : null,
+          paymentExpiresAt: paysOnline ? new Date(now.getTime() + PAYMENT_WINDOW_MS) : null,
           tableId,
           customerName: input.customerName,
           userId,
@@ -167,11 +207,7 @@ export async function placeOrder(
       }
 
       const extra: OutboxEvent[] = [];
-      // Pickup and delivery are paid when ordering. Tables settle with staff at the end.
-      if (input.type !== "dine_in") {
-        const [row] = await tx.select().from(orders).where(eq(orders.id, orderId));
-        extra.push(...(await recordPayment(tx, loc, row!, "online", null)));
-      } else if (tableId) {
+      if (tableId) {
         // Guests who sat down and scanned without being seated by staff are seated now.
         await tx
           .update(diningTables)
@@ -180,10 +216,21 @@ export async function placeOrder(
         extra.push(...(await tableEvents(tx, loc, [tableId])));
       }
 
+      if (cart) {
+        const sent: CartEvent["sent"] = {
+          orderId,
+          number: orderNumber,
+          by: input.customerName,
+          count: lines.reduce((n, l) => n + l.quantity, 0),
+        };
+        await publishCart(tx, { label: tableLabel, tenantId: loc.tenantId }, cart, sent);
+      }
+
       const ticket = (await loadTicket(tx, orderId))!;
       const events: OutboxEvent[] = [
         ...extra.filter((e) => e.type !== "order.updated"),
-        { channel: channels.kitchen(loc.id), type: "ticket.created", payload: ticket },
+        // Unpaid orders stay off the kitchen screen until the payment lands.
+        ...(paysOnline ? [] : [{ channel: channels.kitchen(loc.id), type: "ticket.created" as const, payload: ticket }]),
         { channel: channels.order(orderId), type: "order.updated", payload: ticket },
         ...stockChanges.map((change) => ({
           channel: channels.menu(loc.id),
@@ -227,7 +274,7 @@ async function replay(
   return { ticket: (await loadTicket(db, earlier.id))!, replayed: true };
 }
 
-interface PricedLine {
+export interface PricedLine {
   menuItemId: string;
   name: string;
   quantity: number;
@@ -240,12 +287,12 @@ interface PricedLine {
 }
 
 /** Prices always come from the database, never from the client. */
-async function priceLines(tx: Tx, locationId: string, input: PlaceOrderInput): Promise<PricedLine[]> {
-  const itemIds = [...new Set(input.items.map((i) => i.menuItemId))];
+export async function priceItems(tx: Tx, locationId: string, wanted: PlaceItem[]): Promise<PricedLine[]> {
+  const itemIds = [...new Set(wanted.map((i) => i.menuItemId))];
   const items = await tx
     .select()
     .from(menuItems)
-    .where(and(inArray(menuItems.id, itemIds), eq(menuItems.locationId, locationId)));
+    .where(and(inArray(menuItems.id, itemIds), eq(menuItems.locationId, locationId), eq(menuItems.archived, false)));
   if (items.length !== itemIds.length) {
     throw new AppError(422, "unknown_item", "An item in your order is no longer on the menu");
   }
@@ -263,7 +310,7 @@ async function priceLines(tx: Tx, locationId: string, input: PlaceOrderInput): P
     : [];
   const itemById = new Map(items.map((i) => [i.id, i]));
 
-  return input.items.map((line) => {
+  return wanted.map((line) => {
     const item = itemById.get(line.menuItemId)!;
     const itemGroups = groups.filter((g) => g.itemId === item.id);
     if (new Set(line.modifierIds).size !== line.modifierIds.length) {

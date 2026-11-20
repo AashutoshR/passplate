@@ -8,6 +8,7 @@ import {
   localDate,
   type AdminOverview,
   type GuestView,
+  type InviteView,
   type OrderType,
   type PaymentMethod,
   type StaffMemberView,
@@ -18,12 +19,15 @@ import { ApiError, api } from "../lib/api";
 import { useAccount } from "../lib/account";
 import { RealtimeClient } from "../lib/realtime";
 import { ROLE_LABEL, StaffShell } from "../components/staff";
+import { MenuEditor } from "../components/menu-editor";
 
-type Tab = "overview" | "transactions" | "team" | "guests";
+const TABS = ["overview", "transactions", "menu", "team", "guests"] as const;
+type Tab = (typeof TABS)[number];
+const TAB_LABEL: Record<Tab, string> = { overview: "Overview", transactions: "Transactions", menu: "Menu", team: "Team", guests: "Guests" };
 
 export const Route = createFileRoute("/staff/admin")({
   validateSearch: (s: Record<string, unknown>): { tab?: Tab } => ({
-    tab: ["overview", "transactions", "team", "guests"].includes(s.tab as string) ? (s.tab as Tab) : undefined,
+    tab: (TABS as readonly string[]).includes(s.tab as string) ? (s.tab as Tab) : undefined,
   }),
   head: () => ({ meta: [{ title: "Admin · PassPlate" }, { name: "robots", content: "noindex" }] }),
   component: () => (
@@ -44,14 +48,14 @@ function Admin() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <h1 className="font-serif text-4xl">Admin</h1>
         <nav className="flex border border-espresso/20 bg-cream" aria-label="Admin sections">
-          {(["overview", "transactions", "team", "guests"] as const).map((t) => (
+          {TABS.map((t) => (
             <Link
               key={t}
               to="/staff/admin"
               search={{ tab: t }}
               className={`eyebrow px-4 py-2.5 text-[0.62rem] ${tab === t ? "bg-espresso text-cream" : "text-umber hover:text-espresso"}`}
             >
-              {t === "overview" ? "Overview" : t === "transactions" ? "Transactions" : t === "team" ? "Team" : "Guests"}
+              {TAB_LABEL[t]}
             </Link>
           ))}
         </nav>
@@ -59,6 +63,7 @@ function Admin() {
       <div className="mt-8">
         {tab === "overview" && <Overview />}
         {tab === "transactions" && <Transactions />}
+        {tab === "menu" && <MenuEditor />}
         {tab === "team" && <Team />}
         {tab === "guests" && <Guests />}
       </div>
@@ -453,18 +458,34 @@ function Transactions() {
 
 function Team() {
   const [staff, setStaff] = useState<StaffMemberView[] | null>(null);
-  const [form, setForm] = useState({ name: "", email: "", password: "", role: "staff" as "staff" | "driver" | "admin" });
+  const [invites, setInvites] = useState<InviteView[]>([]);
+  const [form, setForm] = useState({ name: "", email: "", role: "staff" as InviteView["role"] });
+  const [made, setMade] = useState<InviteView | null>(null);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => api<{ staff: StaffMemberView[] }>("/v1/staff/admin/staff").then((r) => setStaff(r.staff)), []);
+  const load = useCallback(async () => {
+    const [s, i] = await Promise.all([
+      api<{ staff: StaffMemberView[] }>("/v1/staff/admin/staff"),
+      api<{ invites: InviteView[] }>("/v1/staff/admin/invites"),
+    ]);
+    setStaff(s.staff);
+    setInvites(i.invites);
+  }, []);
   useEffect(() => void load(), [load]);
   const input = "w-full border border-espresso/25 bg-cream px-3 py-3 outline-none focus:border-espresso";
+  const roleName = (r: InviteView["role"]) => ROLE_LABEL[r];
 
-  async function add(e: React.FormEvent) {
+  async function invite(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setCopied(false);
     try {
-      await api("/v1/staff/admin/staff", { method: "POST", json: form });
-      setForm({ name: "", email: "", password: "", role: "staff" });
+      const created = await api<InviteView>("/v1/staff/admin/invites", {
+        method: "POST",
+        json: { role: form.role, ...(form.name.trim() ? { name: form.name.trim() } : {}), ...(form.email.trim() ? { email: form.email.trim() } : {}) },
+      });
+      setMade(created);
+      setForm({ name: "", email: "", role: "staff" });
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? ((err.details as { message: string }[] | undefined)?.[0]?.message ?? err.message) : "Try again");
@@ -473,74 +494,115 @@ function Team() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-      <section className="border border-espresso/15 bg-cream">
-        <table className="w-full text-left">
-          <thead className="border-b border-espresso/15 text-sm text-taupe">
-            <tr>
-              <th className="px-4 py-3 font-normal">Name</th>
-              <th className="px-4 py-3 font-normal">Role</th>
-              <th className="px-4 py-3 font-normal">Last signed in</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-espresso/10">
-            {staff?.map((s) => (
-              <tr key={s.id}>
-                <td className="px-4 py-3">
-                  <span className="font-medium">{s.name}</span>
-                  <span className="block text-sm text-umber">{s.email}</span>
-                </td>
-                <td className="px-4 py-3">{ROLE_LABEL[s.role]}</td>
-                <td className="px-4 py-3 text-sm text-umber">
-                  {s.lastLoginAt ? new Date(s.lastLoginAt).toLocaleString("en-GB", { timeZone: TZ, dateStyle: "medium", timeStyle: "short" }) : "Never"}
-                </td>
-                <td className="px-4 py-3 text-right">
+      <div className="grid content-start gap-6">
+        <section className="border border-espresso/15 bg-cream">
+          <table className="w-full text-left">
+            <thead className="border-b border-espresso/15 text-sm text-taupe">
+              <tr>
+                <th className="px-4 py-3 font-normal">Name</th>
+                <th className="px-4 py-3 font-normal">Role</th>
+                <th className="px-4 py-3 font-normal">Last signed in</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-espresso/10">
+              {staff?.map((s) => (
+                <tr key={s.id}>
+                  <td className="px-4 py-3">
+                    <span className="font-medium">{s.name}</span>
+                    <span className="block text-sm text-umber">{s.email}</span>
+                  </td>
+                  <td className="px-4 py-3">{ROLE_LABEL[s.role]}</td>
+                  <td className="px-4 py-3 text-sm text-umber">
+                    {s.lastLoginAt ? new Date(s.lastLoginAt).toLocaleString("en-GB", { timeZone: TZ, dateStyle: "medium", timeStyle: "short" }) : "Never"}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!window.confirm(`Remove ${s.name}'s staff access?`)) return;
+                        try {
+                          await api(`/v1/staff/admin/staff/${s.id}`, { method: "DELETE" });
+                          await load();
+                        } catch (err) {
+                          setError(err instanceof ApiError ? err.message : "Try again");
+                        }
+                      }}
+                      className="eyebrow text-[0.58rem] text-umber hover:text-espresso"
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+        {invites.length > 0 && (
+          <section className="border border-espresso/15 bg-cream">
+            <h2 className="border-b border-espresso/15 px-4 py-3 font-serif text-2xl">Waiting to join</h2>
+            <ul className="divide-y divide-espresso/10">
+              {invites.map((i) => (
+                <li key={i.id} className="flex items-center justify-between gap-4 px-4 py-3">
+                  <span>
+                    <span className="font-medium">{i.name ?? i.email ?? "Invite"}</span>
+                    <span className="block text-sm text-umber">
+                      {roleName(i.role)} · link works until {new Date(i.expiresAt).toLocaleDateString("en-GB", { timeZone: TZ, day: "numeric", month: "short" })}
+                    </span>
+                  </span>
                   <button
                     type="button"
                     onClick={async () => {
-                      if (!window.confirm(`Remove ${s.name}'s staff access?`)) return;
-                      try {
-                        await api(`/v1/staff/admin/staff/${s.id}`, { method: "DELETE" });
-                        await load();
-                      } catch (err) {
-                        setError(err instanceof ApiError ? err.message : "Try again");
-                      }
+                      await api(`/v1/staff/admin/invites/${i.id}`, { method: "DELETE" }).catch(() => {});
+                      await load();
                     }}
                     className="eyebrow text-[0.58rem] text-umber hover:text-espresso"
                   >
-                    Remove
+                    Cancel
                   </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-      <form onSubmit={add} className="grid content-start gap-3 border border-espresso/15 bg-cream p-6">
-        <h2 className="font-serif text-2xl">Add someone</h2>
-        <input className={input} placeholder="Name" aria-label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-        <input className={input} placeholder="Work email" aria-label="Work email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
-        <input
-          className={input}
-          placeholder="Temporary password (8+ characters)"
-          aria-label="Temporary password"
-          type="password"
-          autoComplete="new-password"
-          value={form.password}
-          onChange={(e) => setForm({ ...form, password: e.target.value })}
-          required
-          minLength={8}
-        />
-        <select className={input} aria-label="Role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as typeof form.role })}>
-          <option value="staff">Front of house</option>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+      <form onSubmit={invite} className="grid content-start gap-3 border border-espresso/15 bg-cream p-6">
+        <h2 className="font-serif text-2xl">Invite someone</h2>
+        <p className="text-sm text-umber">They get a link, choose their own password, and can start straight away.</p>
+        <select className={input} aria-label="Role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as InviteView["role"] })}>
+          <option value="staff">Front of house and kitchen</option>
           <option value="driver">Driver</option>
           <option value="admin">Admin</option>
         </select>
+        <input className={input} placeholder="Their name (optional)" aria-label="Their name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        <input className={input} placeholder="Work email (optional, locks the link to it)" aria-label="Work email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
         {error && <p className="border border-brass px-3 py-2 text-sm">{error}</p>}
         <button type="submit" className="cta cta-dark px-5 py-3">
-          <span>Create account</span>
+          <span>Make an invite link</span>
         </button>
-        <p className="text-sm text-taupe">Share the password in person; they can sign in straight away.</p>
+        {made?.url && (
+          <div role="status" className="mt-2 border border-olive/60 bg-olive/5 p-4">
+            <p className="text-sm font-medium">Send this link to {made.name ?? "them"}. It works once, for 7 days.</p>
+            <p className="mt-2 break-all font-mono text-sm text-umber" id="invite-url">
+              {made.url}
+            </p>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(made.url!);
+                  setCopied(true);
+                } catch {
+                  setCopied(false);
+                }
+              }}
+              className="eyebrow mt-3 text-[0.6rem] text-brass"
+            >
+              {copied ? "Copied" : "Copy the link"}
+            </button>
+            <p className="mt-2 text-xs text-taupe">This is the only time the link is shown.</p>
+          </div>
+        )}
       </form>
     </div>
   );

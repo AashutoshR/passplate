@@ -10,6 +10,7 @@ import {
   type TransactionsView,
 } from "@pass/shared";
 import { AppError } from "../errors";
+import { refundOnline, type PaymentsConfig } from "./checkout";
 import { enqueue, type OutboxEvent } from "../outbox";
 import { currentSeq, loadTicket } from "../views";
 
@@ -113,8 +114,14 @@ export async function refundOrder(tx: Executor, loc: Location, order: Order, tak
   return [{ channel: channels.admin(loc.id), type: "payment.recorded", payload: await transactionView(tx, p!.id) }];
 }
 
-export async function adminRefund(db: Db, loc: Location, orderId: string, takenBy: string): Promise<TransactionView> {
-  return db.transaction(async (tx) => {
+export async function adminRefund(
+  db: Db,
+  loc: Location,
+  orderId: string,
+  takenBy: string,
+  payments: PaymentsConfig = { provider: "test" },
+): Promise<TransactionView> {
+  const { view, order } = await db.transaction(async (tx) => {
     const [order] = await tx
       .select()
       .from(orders)
@@ -125,8 +132,10 @@ export async function adminRefund(db: Db, loc: Location, orderId: string, takenB
     const events = await refundOrder(tx, loc, order, takenBy);
     if (events.length === 0) throw new AppError(409, "already_refunded", "This order has already been refunded");
     await enqueue(tx, loc.tenantId, events);
-    return events[0]!.payload as TransactionView;
+    return { view: events[0]!.payload as TransactionView, order };
   });
+  await refundOnline(payments, order);
+  return view;
 }
 
 export interface TransactionFilter {

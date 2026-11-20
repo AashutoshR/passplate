@@ -16,6 +16,7 @@ import { Route as MenuRouteImport } from './routes/menu'
 import { Route as StoryRouteImport } from './routes/story'
 import { Route as VisitRouteImport } from './routes/visit'
 import { Route as BookingCodeRouteImport } from './routes/booking.$code'
+import { Route as JoinTokenRouteImport } from './routes/join.$token'
 import { Route as KitchenSlugRouteImport } from './routes/kitchen.$slug'
 import { Route as OrderIdRouteImport } from './routes/order.$id'
 import { Route as RSlugRouteImport } from './routes/r.$slug'
@@ -59,6 +60,11 @@ const VisitRoute = VisitRouteImport.update({
 const BookingCodeRoute = BookingCodeRouteImport.update({
   id: '/booking/$code',
   path: '/booking/$code',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JoinTokenRoute = JoinTokenRouteImport.update({
+  id: '/join/$token',
+  path: '/join/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const KitchenSlugRoute = KitchenSlugRouteImport.update({
@@ -115,6 +121,7 @@ export interface FileRoutesByFullPath {
   '/story': typeof StoryRoute
   '/visit': typeof VisitRoute
   '/booking/$code': typeof BookingCodeRoute
+  '/join/$token': typeof JoinTokenRoute
   '/kitchen/$slug': typeof KitchenSlugRoute
   '/order/$id': typeof OrderIdRoute
   '/r/$slug': typeof RSlugRoute
@@ -133,6 +140,7 @@ export interface FileRoutesByTo {
   '/story': typeof StoryRoute
   '/visit': typeof VisitRoute
   '/booking/$code': typeof BookingCodeRoute
+  '/join/$token': typeof JoinTokenRoute
   '/kitchen/$slug': typeof KitchenSlugRoute
   '/order/$id': typeof OrderIdRoute
   '/r/$slug': typeof RSlugRoute
@@ -152,6 +160,7 @@ export interface FileRoutesById {
   '/story': typeof StoryRoute
   '/visit': typeof VisitRoute
   '/booking/$code': typeof BookingCodeRoute
+  '/join/$token': typeof JoinTokenRoute
   '/kitchen/$slug': typeof KitchenSlugRoute
   '/order/$id': typeof OrderIdRoute
   '/r/$slug': typeof RSlugRoute
@@ -172,6 +181,7 @@ export interface FileRouteTypes {
     | '/story'
     | '/visit'
     | '/booking/$code'
+    | '/join/$token'
     | '/kitchen/$slug'
     | '/order/$id'
     | '/r/$slug'
@@ -190,6 +200,7 @@ export interface FileRouteTypes {
     | '/story'
     | '/visit'
     | '/booking/$code'
+    | '/join/$token'
     | '/kitchen/$slug'
     | '/order/$id'
     | '/r/$slug'
@@ -208,6 +219,7 @@ export interface FileRouteTypes {
     | '/story'
     | '/visit'
     | '/booking/$code'
+    | '/join/$token'
     | '/kitchen/$slug'
     | '/order/$id'
     | '/r/$slug'
@@ -227,6 +239,7 @@ export interface RootRouteChildren {
   StoryRoute: typeof StoryRoute
   VisitRoute: typeof VisitRoute
   BookingCodeRoute: typeof BookingCodeRoute
+  JoinTokenRoute: typeof JoinTokenRoute
   KitchenSlugRoute: typeof KitchenSlugRoute
   OrderIdRoute: typeof OrderIdRoute
   RSlugRoute: typeof RSlugRoute
@@ -287,6 +300,13 @@ declare module '@tanstack/react-router' {
       path: '/booking/$code'
       fullPath: '/booking/$code'
       preLoaderRoute: typeof BookingCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/join/$token': {
+      id: '/join/$token'
+      path: '/join/$token'
+      fullPath: '/join/$token'
+      preLoaderRoute: typeof JoinTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/kitchen/$slug': {
@@ -363,6 +383,7 @@ const rootRouteChildren: RootRouteChildren = {
   StoryRoute: StoryRoute,
   VisitRoute: VisitRoute,
   BookingCodeRoute: BookingCodeRoute,
+  JoinTokenRoute: JoinTokenRoute,
   KitchenSlugRoute: KitchenSlugRoute,
   OrderIdRoute: OrderIdRoute,
   RSlugRoute: RSlugRoute,

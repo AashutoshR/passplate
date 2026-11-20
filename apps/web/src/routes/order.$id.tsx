@@ -13,6 +13,8 @@ import {
 } from "@pass/shared";
 import { ApiError, api } from "../lib/api";
 import { useAccount } from "../lib/account";
+import { storage } from "../lib/ids";
+import { PaymentPanel } from "../components/payment";
 import { RealtimeClient, type LinkStatus } from "../lib/realtime";
 import { SITE } from "../lib/site";
 import { Logo } from "../components/brand";
@@ -33,6 +35,7 @@ export const Route = createFileRoute("/order/$id")({
 });
 
 const STATUS_TEXT: Partial<Record<OrderStatus, string>> = {
+  awaiting_payment: "Awaiting payment",
   received: "Received",
   cooking: "Cooking",
   ready: "Ready",
@@ -83,6 +86,17 @@ function OrderStatusPage() {
     return () => client.stop();
   }, [initial.ticket.id, initial.seq, apply, reload, moveDriver]);
 
+  // Paid: the basket that made this order can go. (Until then it is kept, in
+  // case the guest goes back to change something.)
+  useEffect(() => {
+    if (!ticket.paid) return;
+    const kept = storage.get<{ orderId: string; key: string } | null>("pass:basket-for-order", null);
+    if (kept?.orderId === ticket.id) {
+      storage.remove(kept.key);
+      storage.remove("pass:basket-for-order");
+    }
+  }, [ticket.paid, ticket.id]);
+
   // A finished order adds a stamp: show the new count.
   useEffect(() => {
     if (["completed", "delivered"].includes(ticket.status)) void refresh();
@@ -98,6 +112,8 @@ function OrderStatusPage() {
   const steps = customerSteps(ticket.type);
   const current = steps.findIndex((s) => s.status === ticket.status);
   const cancelled = ticket.status === "cancelled";
+  const awaiting = ticket.status === "awaiting_payment";
+  const neverPaid = cancelled && !ticket.paid && ticket.type !== "dine_in";
   const money = (m: number) => formatMoney(m, ticket.currency);
   const ready = ticket.status === "ready";
   const d = ticket.delivery;
@@ -126,6 +142,10 @@ function OrderStatusPage() {
         <h1 key={ticket.status} className="display line-in mt-4 text-[3.6rem]">
           {cancelled ? (
             <span className="text-oxblood">Cancelled.</span>
+          ) : awaiting ? (
+            <>
+              Almost there<span className="text-brass">.</span>
+            </>
           ) : ready ? (
             <>
               It's ready.
@@ -138,8 +158,12 @@ function OrderStatusPage() {
           )}
         </h1>
         <p className="fade-up mt-3 text-lg text-umber" style={{ ["--delay" as string]: "200ms" }}>
-          {cancelled
+          {neverPaid
+            ? "It was not paid in time, so nothing was charged and the dishes went back on the menu. Please order again."
+            : cancelled
             ? "Please speak to a member of staff."
+            : awaiting
+            ? "Pay below and your order goes straight to the kitchen."
               : ready
               ? ticket.type === "pickup"
                 ? "Come to the counter and give your name."
@@ -154,7 +178,9 @@ function OrderStatusPage() {
         </p>
       </div>
 
-      {!cancelled && (
+      {awaiting && <PaymentPanel ticket={ticket} onPaid={apply} />}
+
+      {!cancelled && !awaiting && (
         <div className="mt-10">
           <div className="flex gap-1" aria-hidden="true">
             {steps.map((s, i) => (
@@ -180,7 +206,7 @@ function OrderStatusPage() {
         </div>
       )}
 
-      {d && !cancelled && (
+      {d && !cancelled && !awaiting && (
         <section className="mt-12">
           <MapView
             ariaLabel="Delivery map"

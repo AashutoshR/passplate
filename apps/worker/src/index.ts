@@ -8,15 +8,18 @@ import postgres from "postgres";
  * it can hand out a global, gap-free `seq` in exactly the order events are
  * published. Extra instances wait as hot standbys and take over if it dies.
  *
- * Wake-ups come from pg_notify when an order commits, with a short poll as a
- * safety net, so latency stays in milliseconds without hammering the database.
+ * It polls the partial index of unpublished rows every 20 ms, a query that
+ * touches only the handful of rows waiting. (A pg_notify per transaction was
+ * tried first: Postgres serializes the commit of every notifying transaction
+ * on one lock, which capped the whole system under load.) Anyone may still
+ * send NOTIFY outbox to wake it early.
  */
 
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://pass:pass@localhost:5433/pass";
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6380";
 const LOCK_KEY = 7_242_001;
 const BATCH = 500;
-const POLL_MS = 250;
+const POLL_MS = Number(process.env.RELAY_POLL_MS ?? 20);
 
 const sql = postgres(DATABASE_URL, {
   max: 3,
@@ -74,6 +77,14 @@ async function relayBatch(): Promise<number> {
   rows.sort((a, b) => Number(a.seq) - Number(b.seq));
   try {
     const pipe = redis.pipeline();
+    // NFR-17: any menu event (stock, sold out, an edit) clears that restaurant's
+    // cached menu, and records the seq a cached copy must have reached to be used.
+    const menuSeq = new Map<string, number>();
+    for (const r of rows) if (r.channel.startsWith("menu:")) menuSeq.set(r.channel.slice(5), Number(r.seq));
+    for (const [locationId, seq] of menuSeq) {
+      pipe.set(`menu-min-seq:${locationId}`, seq, "EX", 86_400);
+      pipe.del(`menu:${locationId}`);
+    }
     for (const r of rows) {
       pipe.publish(
         `ev:${r.channel}`,

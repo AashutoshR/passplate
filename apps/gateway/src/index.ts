@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { ServerWebSocket } from "bun";
 import Redis from "ioredis";
 import postgres from "postgres";
@@ -169,23 +169,6 @@ function flush(ws: Socket) {
   for (const env of buffered) deliver(ws, env);
 }
 
-const kitchenHashes = new Map<string, { hash: string | null; at: number }>();
-async function kitchenAllowed(locationId: string, token: string | undefined): Promise<boolean> {
-  if (!token) return false;
-  let entry = kitchenHashes.get(locationId);
-  if (!entry || Date.now() - entry.at > 30_000) {
-    const [row] = await sql<{ hash: string }[]>`
-      select kitchen_token_hash as hash from locations where id = ${locationId}
-    `;
-    entry = { hash: row?.hash ?? null, at: Date.now() };
-    kitchenHashes.set(locationId, entry);
-  }
-  if (!entry.hash) return false;
-  const a = Buffer.from(entry.hash, "hex");
-  const b = createHash("sha256").update(token).digest();
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 /** Session cookie to user, the same lookup the API does. */
 async function userFromCookie(cookie: string | null): Promise<Client["user"]> {
   const token = cookie
@@ -207,14 +190,15 @@ function staffAllowed(user: Client["user"], locationId: string, roles: string[])
   return Boolean(user && user.locationId === locationId && (roles.includes(user.role) || user.role === "admin"));
 }
 
-async function handleSubscribe(ws: Socket, channelsWanted: string[], since: number | undefined, token?: string) {
+async function handleSubscribe(ws: Socket, channelsWanted: string[], since: number | undefined) {
   for (const ch of channelsWanted) {
     const [kind, id] = ch.split(":") as [string, string];
-    // SEC-2: kitchen channels need the kitchen code or a signed-in member of staff.
-    // Menu, order and availability are public by design.
+    // SEC-2: kitchen, floor, driver and admin channels need a signed-in member
+    // of staff at that restaurant. Menu, order, cart and availability are
+    // public by design (order and cart ids are unguessable).
     const allowed =
       kind === "kitchen"
-        ? staffAllowed(ws.data.user, id, ["staff"]) || (await kitchenAllowed(id, token))
+        ? staffAllowed(ws.data.user, id, ["staff"])
         : kind === "floor"
           ? staffAllowed(ws.data.user, id, ["staff"])
           : kind === "drivers"
@@ -328,7 +312,7 @@ const server = Bun.serve<Client>({
       }
       const msg = parsed.data;
       if (msg.op === "ping") return send(ws, { op: "pong", at: new Date().toISOString() });
-      await handleSubscribe(ws, msg.channels, msg.since, msg.token);
+      await handleSubscribe(ws, msg.channels, msg.since);
     },
     close(ws) {
       connections--;

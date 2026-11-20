@@ -2,6 +2,11 @@ import { Hono, type Context } from "hono";
 import { eq } from "drizzle-orm";
 import { locations, type Db } from "@pass/db";
 import {
+  AcceptInviteSchema,
+  CategoryInputSchema,
+  CreateInviteSchema,
+  ItemInputSchema,
+  ReorderSchema,
   AvailabilityQuerySchema,
   BookTableSchema,
   CreateStaffSchema,
@@ -49,6 +54,20 @@ import { availability, bookTable, changeReservation, maskPhone, reservationByCod
 import { completeDelivery, driverBoard, takeDelivery, updateDriverLocation } from "./services/delivery";
 import { addToWaitlist, clearTable, floorSnapshot, leaveWaitlist, seatTable, settleTable } from "./services/floor";
 import { adminRefund, listTransactions } from "./services/payments";
+import type { PaymentsConfig } from "./services/checkout";
+import { acceptInvite, createInvite, pendingInvites, previewInvite, revokeInvite } from "./services/invites";
+import { saveUpload } from "./services/media";
+import {
+  adminMenu,
+  archiveCategory,
+  createCategory,
+  createItem,
+  reorderCategories,
+  reorderItems,
+  setItemArchived,
+  updateCategory,
+  updateItem,
+} from "./services/menu-admin";
 import { UUID_PATTERN } from "./util";
 
 async function readJson(c: Context): Promise<unknown> {
@@ -149,8 +168,30 @@ export function bookingRoutes(db: Db) {
   return r;
 }
 
+/** Staff invite links (FR-22): look one up, then accept it with a name and password. */
+export function inviteRoutes(db: Db) {
+  const r = new Hono<AuthEnv>();
+  r.get("/:token", async (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json(await previewInvite(db, c.req.param("token")));
+  });
+  r.post("/:token/accept", async (c) => {
+    const body = parse(AcceptInviteSchema, await readJson(c));
+    const user = await acceptInvite(db, c.req.param("token"), body);
+    await startSession(db, c, user.id);
+    return c.json({ user, rewards: null } satisfies AccountView, 201);
+  });
+  return r;
+}
+
 /** Everything behind a staff sign-in: the floor, deliveries and the admin screens. */
-export function staffRoutes(db: Db) {
+export function staffRoutes(
+  db: Db,
+  opts: { payments: PaymentsConfig; publicOrigin: string; uploadDir?: string } = {
+    payments: { provider: "test" },
+    publicOrigin: "http://localhost:3000",
+  },
+) {
   const r = new Hono<AuthEnv>();
 
   async function myLocation(c: Context<AuthEnv>, roles: ("staff" | "driver" | "admin")[]) {
@@ -248,7 +289,7 @@ export function staffRoutes(db: Db) {
   });
   r.post("/admin/orders/:id/refund", async (c) => {
     const { loc, user } = await myLocation(c, ["admin"]);
-    return c.json(await adminRefund(db, loc, uuidParam(c, "id"), user.id));
+    return c.json(await adminRefund(db, loc, uuidParam(c, "id"), user.id, opts.payments));
   });
   r.get("/admin/staff", async (c) => {
     const { loc } = await myLocation(c, ["admin"]);
@@ -263,6 +304,74 @@ export function staffRoutes(db: Db) {
     await removeStaff(db, loc.id, uuidParam(c, "id"), user.id);
     return c.json({ ok: true });
   });
+  // Staff invites (FR-22).
+  r.get("/admin/invites", async (c) => {
+    const { loc } = await myLocation(c, ["admin"]);
+    c.header("Cache-Control", "no-store");
+    return c.json({ invites: await pendingInvites(db, loc) });
+  });
+  r.post("/admin/invites", async (c) => {
+    const { loc, user } = await myLocation(c, ["admin"]);
+    return c.json(await createInvite(db, loc, parse(CreateInviteSchema, await readJson(c)), user.id, opts.publicOrigin), 201);
+  });
+  r.delete("/admin/invites/:id", async (c) => {
+    const { loc } = await myLocation(c, ["admin"]);
+    await revokeInvite(db, loc, uuidParam(c, "id"));
+    return c.json({ ok: true });
+  });
+
+  // The menu editor (FR-1).
+  r.get("/admin/menu", async (c) => {
+    const { loc } = await myLocation(c, ["admin"]);
+    c.header("Cache-Control", "no-store");
+    return c.json(await adminMenu(db, loc));
+  });
+  r.post("/admin/menu/categories", async (c) => {
+    const { loc } = await myLocation(c, ["admin"]);
+    return c.json(await createCategory(db, loc, parse(CategoryInputSchema, await readJson(c))), 201);
+  });
+  r.post("/admin/menu/categories/order", async (c) => {
+    const { loc } = await myLocation(c, ["admin"]);
+    return c.json(await reorderCategories(db, loc, parse(ReorderSchema, await readJson(c)).ids));
+  });
+  r.patch("/admin/menu/categories/:id", async (c) => {
+    const { loc } = await myLocation(c, ["admin"]);
+    return c.json(await updateCategory(db, loc, uuidParam(c, "id"), parse(CategoryInputSchema, await readJson(c))));
+  });
+  r.delete("/admin/menu/categories/:id", async (c) => {
+    const { loc } = await myLocation(c, ["admin"]);
+    return c.json(await archiveCategory(db, loc, uuidParam(c, "id")));
+  });
+  r.post("/admin/menu/categories/:id/order", async (c) => {
+    const { loc } = await myLocation(c, ["admin"]);
+    return c.json(await reorderItems(db, loc, uuidParam(c, "id"), parse(ReorderSchema, await readJson(c)).ids));
+  });
+  r.post("/admin/menu/items", async (c) => {
+    const { loc } = await myLocation(c, ["admin"]);
+    return c.json(await createItem(db, loc, parse(ItemInputSchema, await readJson(c))), 201);
+  });
+  r.put("/admin/menu/items/:id", async (c) => {
+    const { loc } = await myLocation(c, ["admin"]);
+    return c.json(await updateItem(db, loc, uuidParam(c, "id"), parse(ItemInputSchema, await readJson(c))));
+  });
+  r.delete("/admin/menu/items/:id", async (c) => {
+    const { loc } = await myLocation(c, ["admin"]);
+    return c.json(await setItemArchived(db, loc, uuidParam(c, "id"), true));
+  });
+  r.post("/admin/menu/items/:id/restore", async (c) => {
+    const { loc } = await myLocation(c, ["admin"]);
+    return c.json(await setItemArchived(db, loc, uuidParam(c, "id"), false));
+  });
+  r.post("/admin/menu/photos", async (c) => {
+    await myLocation(c, ["admin"]);
+    const form = await c.req.formData().catch(() => {
+      throw new AppError(400, "invalid_form", "Send the photo as multipart form data");
+    });
+    const file = form.get("photo");
+    if (!(file instanceof File)) throw new AppError(400, "no_file", "Choose a photo to upload");
+    return c.json(await saveUpload(file, opts.uploadDir), 201);
+  });
+
   r.get("/admin/guests", async (c) => {
     const { loc } = await myLocation(c, ["admin"]);
     return c.json({ guests: await listGuests(db, loc.id) });

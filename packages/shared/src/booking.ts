@@ -1,3 +1,4 @@
+import { dateFormat } from "./format-cache";
 import { z } from "zod";
 import { WEEKDAYS, type OpeningHours } from "./hours";
 
@@ -184,7 +185,7 @@ function toMinutes(hhmm: string): number {
 export function zonedTime(date: string, time: string, timeZone: string): Date {
   const guess = new Date(`${date}T${time}:00Z`);
   const offset = (d: Date) => {
-    const parts = new Intl.DateTimeFormat("en-GB", {
+    const parts = dateFormat("en-GB", {
       timeZone,
       year: "numeric",
       month: "2-digit",
@@ -204,11 +205,11 @@ export function zonedTime(date: string, time: string, timeZone: string): Date {
 
 /** Today's date in the restaurant's time zone, as YYYY-MM-DD. */
 export function localDate(timeZone: string, now: Date = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+  return dateFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 }
 
 export function localTime(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(
+  return dateFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(
     new Date(iso),
   );
 }

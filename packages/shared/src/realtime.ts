@@ -8,12 +8,13 @@ import { z } from "zod";
  * reconnects, so the gateway can replay anything it missed (NFR-7).
  */
 
-export const CHANNEL_PATTERN = /^(kitchen|menu|order|floor|admin|availability|drivers):[0-9a-f-]{36}$/;
+export const CHANNEL_PATTERN = /^(kitchen|menu|order|floor|admin|availability|drivers|cart):[0-9a-f-]{36}$/;
 
 /**
- * kitchen, floor and drivers need staff; admin needs an admin. menu, order and
- * availability are public: order ids are unguessable and availability carries
- * no personal data.
+ * kitchen, floor and drivers need staff; admin needs an admin. menu, order,
+ * cart and availability are public: order and cart ids are unguessable (a cart
+ * id is only handed to someone holding the table's QR code), and availability
+ * carries no personal data.
  */
 export const channels = {
   kitchen: (locationId: string) => `kitchen:${locationId}`,
@@ -23,6 +24,7 @@ export const channels = {
   admin: (locationId: string) => `admin:${locationId}`,
   availability: (locationId: string) => `availability:${locationId}`,
   drivers: (locationId: string) => `drivers:${locationId}`,
+  cart: (cartId: string) => `cart:${cartId}`,
 };
 
 export const EVENT_TYPES = [
@@ -37,6 +39,10 @@ export const EVENT_TYPES = [
   "payment.recorded",
   "order.driver_location",
   "delivery.updated",
+  /** The whole shared table cart, after any change. */
+  "cart.updated",
+  /** A manager edited the menu: reload it. */
+  "menu.changed",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -54,7 +60,6 @@ export const ClientMessageSchema = z.discriminatedUnion("op", [
     op: z.literal("subscribe"),
     channels: z.array(z.string().regex(CHANNEL_PATTERN)).min(1).max(20),
     since: z.number().int().min(0).optional(),
-    token: z.string().max(200).optional(),
   }),
   z.object({ op: z.literal("ping") }),
 ]);

@@ -8,7 +8,6 @@ import { StaffShell } from "../components/staff";
 interface Demo {
   location: { id: string; slug: string; name: string };
   tables: { label: string; token: string }[];
-  kitchenCode: string;
   lanUrls: string[];
 }
 
@@ -56,14 +55,7 @@ function StaffPage() {
           <div className="flex flex-col items-start gap-5">
             <h1 className="display text-[clamp(2.6rem,5vw,4.4rem)]">Open the line.</h1>
             <p className="max-w-lg text-lg text-umber">
-              Run this on the tablet at the pass. Sign in with the device code for this kitchen.
-              {demo && (
-                <>
-                  {" "}
-                  On this development server the code is{" "}
-                  <code className="border border-espresso/25 bg-linen px-1.5 py-0.5 font-mono text-espresso">{demo.kitchenCode}</code>.
-                </>
-              )}
+              Run this on the tablet at the pass, signed in with a staff account. Every tap is recorded against the person who made it.
             </p>
             <Link to="/kitchen/$slug" params={{ slug: SITE.slug }} className="cta cta-dark px-7 py-4">
               <span>Open the kitchen screen</span>

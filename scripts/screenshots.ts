@@ -178,7 +178,7 @@ async function signIn(role: keyof typeof DEMO_ACCOUNTS) {
   await evaluate(`fetch("/api/v1/account/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(${JSON.stringify({ email: a.email, password: a.password })}) }).then(r => r.status)`);
 }
 const wide: View = { w: 1600, h: 1000 };
-if (!only.length || only.some((o) => ["account-signed", "delivery", "checkout", "floor", "driver", "admin"].some((p) => p.startsWith(o) || o.startsWith(p)))) {
+if (!only.length || only.some((o) => ["account-signed", "delivery", "checkout", "floor", "driver", "admin", "table-cart"].some((p) => p.startsWith(o) || o.startsWith(p)))) {
   await open(`${WEB}/visit`, desktop, 1500);
   await signIn("customer");
   await single("account-signed-desktop", `${WEB}/account`, desktop);
@@ -205,23 +205,25 @@ if (!only.length || only.some((o) => ["account-signed", "delivery", "checkout", 
   await signIn("admin");
   await single("admin-overview-desktop", `${WEB}/staff/admin`, desktop, 4000);
   await single("admin-transactions-desktop", `${WEB}/staff/admin?tab=transactions`, desktop, 4000, `[...document.querySelectorAll("button")].find(b => b.textContent === "7 days")?.click()`);
+  await single("admin-menu-desktop", `${WEB}/staff/admin?tab=menu`, desktop, 4000);
+  await single(
+    "admin-menu-dish-desktop",
+    `${WEB}/staff/admin?tab=menu`,
+    desktop,
+    4000,
+    `[...document.querySelectorAll("section li button")].find((b) => b.textContent.trim().length > 3)?.click()`,
+  );
+  await single("admin-team-desktop", `${WEB}/staff/admin?tab=team`, desktop, 3500);
   await evaluate(`fetch("/api/v1/account/logout", { method: "POST" })`);
 }
 
-// Newest order for the status page, if there is one.
-const snap = await (
-  await fetch(`${API}/v1/kitchen/${demo.location.id}/tickets`, { headers: { Authorization: `Bearer ${demo.kitchenCode}` } })
-).json();
-const latest = snap.tickets.at(-1);
-if (latest) await single("order-status-phone", `${WEB}/order/${latest.id}`, phone);
-
-// Sign the kitchen screen in through localStorage, then capture the board.
-await send("Runtime.evaluate", {
-  expression: `localStorage.setItem("pass:kitchen:${demo.location.slug}", ${JSON.stringify(
-    JSON.stringify({ locationId: demo.location.id, locationName: demo.location.name, token: demo.kitchenCode }),
-  )})`,
-});
+// The kitchen signs in with its own staff account, then the board and the newest order.
+await open(`${WEB}/visit`, desktop, 1500);
+await signIn("kitchen");
 await single("kitchen-desktop", `${WEB}/kitchen/${demo.location.slug}`, desktop);
+const snap = await evaluate(`fetch("/api/v1/kitchen/${demo.location.id}/tickets").then((r) => r.json()).then((s) => s.tickets.at(-1)?.id ?? "")`);
+if (snap) await single("order-status-phone", `${WEB}/order/${snap}`, phone);
+await evaluate(`fetch("/api/v1/account/logout", { method: "POST" })`);
 
 ws.close();
 proc.kill();
