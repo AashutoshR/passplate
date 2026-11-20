@@ -21,7 +21,7 @@
  *
  * Usage: bun scripts/simulate.ts
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,6 +47,9 @@ const exe =
   ].find((b) => existsSync(b));
 if (!exe) throw new Error("No Edge or Chrome found. Set BROWSER to its path.");
 const profile = join(tmpdir(), `passplate-sim-${Date.now()}`);
+// A run that was killed outright cannot clean up after itself, so the next run
+// closes any browser such a run left behind, before starting its own.
+killBrowsersUsing(join(tmpdir(), "passplate-sim-"));
 const proc = spawn(exe, [
   "--headless=new",
   `--remote-debugging-port=${PORT}`,
@@ -57,8 +60,27 @@ const proc = spawn(exe, [
   "--enable-unsafe-swiftshader",
   "about:blank",
 ]);
+/**
+ * Closes the whole browser. On Windows the process Edge is started as hands
+ * over to another and exits at once, so its id is no use: every process using
+ * this run's own profile folder is ended instead.
+ */
+function closeBrowser() {
+  if (process.platform !== "win32") return void proc.kill();
+  killBrowsersUsing(profile);
+}
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => process.exit(130));
+// A crash must still close the browser: without these, Bun skips the exit event.
+process.on("uncaughtException", (err) => {
+  console.error(err);
+  process.exit(1);
+});
+process.on("unhandledRejection", (err) => {
+  console.error(err);
+  process.exit(1);
+});
 process.on("exit", () => {
-  proc.kill();
+  closeBrowser();
   try {
     rmSync(profile, { recursive: true, force: true });
   } catch {}
@@ -793,3 +815,18 @@ await Bun.write(join(OUT, "report.json"), JSON.stringify({ steps, findings, shot
 console.log(`\n${passed}/${steps.length} steps passed, ${findings.length} findings. Report: docs/user-testing/report.md`);
 ws.close();
 process.exit(0);
+
+/** Ends every Edge or Chrome process whose command line names a profile folder starting with `dir` (Windows). */
+function killBrowsersUsing(dir: string) {
+  if (process.platform !== "win32") return;
+  const needle = dir.replaceAll("'", "''");
+  spawnSync(
+    "powershell",
+    [
+      "-NoProfile",
+      "-Command",
+      `Get-CimInstance Win32_Process -Filter "Name='msedge.exe' or Name='chrome.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${needle}') } | ForEach-Object { taskkill /PID $_.ProcessId /T /F 2>$null | Out-Null }`,
+    ],
+    { stdio: "ignore" },
+  );
+}
