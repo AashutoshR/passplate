@@ -455,18 +455,34 @@ async function priyaAndDee() {
   await priya.step("pays: her first card is declined, the second goes through", () => checkout(priya, { declineFirst: true }));
   const orderId = await orderIdFromUrl(priya);
 
-  await dee.step("signs in on the driver screen", async () => {
+  await dee.step("signs in on the driver screen and starts her shift", async () => {
     await dee.signIn("driver", "/staff/driver");
     await dee.waitFor(textHas("From the kitchen"), "the driver board");
+    await dee.click(`document.querySelector("#shift-toggle")`, "Start shift");
+    await dee.waitFor(textHas("On shift."), "being on shift");
   });
+  const marco = await new Persona("Marco (dispatch)", WIDE).start();
+  extra.push(marco);
+  await marco.step("opens the dispatch map and gives Priya's order to Dee", async () => {
+    await marco.signIn("staff", "/staff/dispatch");
+    await marco.waitFor(textHas("Waiting for a driver"), "the dispatch board");
+    await marco.waitFor(`document.querySelector("[data-map='loaded'], [data-map='style']")`, "the map", 20_000);
+    await marco.click(byText("aside button[aria-pressed]", "Priya"), "Priya's order");
+    await marco.waitFor(textHas("Give it to"), "the driver choices");
+    await marco.click(byText("#dispatch-selected button", "Dee Okafor"), "Dee Okafor");
+    await marco.waitFor(textHas("→ Dee Okafor"), "the order marked as Dee's", 10_000);
+  });
+  await marco.waitFor(`document.querySelector("[data-map='loaded']")`, "the map tiles", 20_000).catch(() => {});
+  await marco.shot("marco-dispatch.jpg", "Marco's dispatch map: Priya's order given to Dee");
+  await dee.step("sees it given to her, live", () => dee.waitFor(textHas("Given to you by the dispatcher"), "the assigned delivery", 10_000));
   await priya.step("the kitchen cooks it", () => kitchenMove(orderId, [["received", "cooking"], ["cooking", "ready"]]));
-  await dee.step("sees it ready (live) and takes it", async () => {
-    await dee.waitFor(byText("button", "Take this delivery"), "the ready delivery", 10_000);
-    await dee.click(byText("button", "Take this delivery"), "Take this delivery");
+  await dee.step("sees it ready and sets off", async () => {
+    await dee.waitFor(byText("button", "Picked up, set off"), "the ready delivery", 10_000);
+    await dee.click(byText("button", "Picked up, set off"), "Picked up, set off");
     await dee.waitFor(textHas("On the road"), "the route card");
   });
   await dee.step("drives the route", () => dee.click(byText("button", "Practise the route"), "Practise the route"));
-  await priya.step("watches the rider move on her map", async () => {
+  await priya.step("watches the rider move on her map, with an arrival time", async () => {
     await priya.waitFor(`document.querySelector(".map-pin-driver")`, "the rider on the map", 15_000);
     const box = await priya.eval<number>(`document.querySelector("[data-map]")?.getBoundingClientRect().height ?? 0`);
     if (box < 100) throw new Error(`the map is not visible (${box}px tall)`);
@@ -475,13 +491,36 @@ async function priyaAndDee() {
     await Bun.sleep(8000);
     const b = await pos();
     if (a === b) throw new Error("the rider pin did not move");
+    // She lives round the corner, so "nearly there" may come before any arrival time.
+    await priya.waitFor(`${textHas("arriving in about")} || ${textHas("nearly there")}`, "an arrival time");
   });
   await priya.shot("priya-tracking.jpg", "Priya's order page: the rider moving towards her");
+  await marco.step("sees Dee moving on the dispatch map", () => marco.waitFor(textHas("On the road"), "the road list"));
   await dee.shot("dee-route.jpg", "Dee's driver screen during the delivery");
-  await dee.step("hands it over", async () => {
-    await dee.click(byText("button", "Delivered"), "Delivered");
+  await priya.step("is told the rider is nearly there (within 200 m)", () =>
+    priya.waitFor(textHas("Your driver is less than 200 m away."), "the nearly-there alert", 75_000),
+  );
+  await priya.shot("priya-arriving.jpg", "Priya's order page: the driver is nearly there");
+  await dee.step("leaves it at the door and says so", async () => {
+    await dee.click(`document.querySelector("#delivered")`, "Delivered");
+    await dee.waitFor(`document.querySelector("#proof")`, "the proof choices");
+    await dee.click(byText("#proof label", "Left at the door"), "Left at the door");
+    await dee.type(`document.querySelector("#proof-note")`, "Rang twice, left on the step", "note");
+    await dee.click(`document.querySelector("#confirm-delivered")`, "Confirm delivered");
+    await dee.waitFor(textHas("No deliveries waiting"), "the empty board", 10_000);
   });
-  await priya.step("sees it delivered", () => priya.waitFor(textHas("Enjoy. Thank you for ordering."), "the delivered message", 10_000));
+  await priya.step("sees it delivered, with how it was left", () => priya.waitFor(textHas("Left at the door"), "the delivered message", 10_000));
+  await priya.step("opens her receipt", async () => {
+    await priya.waitFor(`document.querySelector("#receipt-link")`, "the receipt link", 15_000);
+    await priya.click(`document.querySelector("#receipt-link")`, "View or print receipt");
+    await priya.waitFor(`document.querySelector("[data-receipt]")`, "the receipt", 15_000);
+    const text = await priya.eval<string>(`document.querySelector("[data-receipt]").innerText`);
+    if (!/VAT 20% included/.test(text) || !/R-\d{6}/.test(text)) throw new Error("the receipt is missing its number or VAT line");
+  });
+  await priya.shot("priya-receipt.jpg", "Priya's receipt, ready to print or save as a PDF");
+  await marco.step("sees it under Delivered today, with the proof", () =>
+    marco.waitFor(`document.querySelector("#delivered-list")?.innerText.includes("Rang twice")`, "the delivered list", 10_000),
+  );
   return [priya, dee];
 }
 
@@ -600,6 +639,18 @@ async function marcoAndAsha() {
   await jo.step("opens the kitchen screen with that account", async () => {
     await jo.goto("/kitchen/passplate");
     await jo.waitFor(textHas("Stock"), "the kitchen board", 12_000);
+  });
+  await marco.step("the guests ask for a receipt: it is ready to print", async () => {
+    await marco.waitFor(`document.querySelector("#print-table-receipt")`, "the Print receipt button");
+    const href = await marco.eval<string>(`document.querySelector("#print-table-receipt").getAttribute("href")`);
+    const orderId = href.split("?")[0]!.split("/").pop()!;
+    // The worker writes it a moment after the payment.
+    let receipt: { number?: number; orderIds?: string[] } | null = null;
+    for (let i = 0; i < 20 && !receipt?.number; i++) {
+      receipt = await marco.eval(`fetch("/api/v1/staff/receipts/order/${orderId}").then((r) => r.json())`);
+      if (!receipt?.number) await Bun.sleep(500);
+    }
+    if (!receipt?.number) throw new Error("no receipt was written for the table");
   });
   await marco.step("resets the table", async () => {
     await marco.click(byText("aside button", "Table is reset and ready"), "Table is reset and ready");

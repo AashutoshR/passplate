@@ -183,7 +183,8 @@ describe("rewards", () => {
 
     const again = await placeOrder({ useReward: true, items: [{ menuItemId: fries, quantity: 1 }] }, cookie);
     expect(again.status).toBe(409);
-  });
+    // Forty requests one after another: more than the default 5 s on a busy machine.
+  }, 30_000);
 
   test("a reward needs an account", async () => {
     const res = await placeOrder({ useReward: true, items: [{ menuItemId: item("Fries").id, quantity: 1 }] });

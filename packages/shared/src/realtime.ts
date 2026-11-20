@@ -8,7 +8,7 @@ import { z } from "zod";
  * reconnects, so the gateway can replay anything it missed (NFR-7).
  */
 
-export const CHANNEL_PATTERN = /^(kitchen|menu|order|floor|admin|availability|drivers|cart):[0-9a-f-]{36}$/;
+export const CHANNEL_PATTERN = /^(kitchen|menu|order|floor|admin|availability|drivers|dispatch|cart):[0-9a-f-]{36}$/;
 
 /**
  * kitchen, floor and drivers need staff; admin needs an admin. menu, order,
@@ -24,6 +24,8 @@ export const channels = {
   admin: (locationId: string) => `admin:${locationId}`,
   availability: (locationId: string) => `availability:${locationId}`,
   drivers: (locationId: string) => `drivers:${locationId}`,
+  /** Driver positions and shifts, for the dispatch map. Staff only: drivers do not see each other. */
+  dispatch: (locationId: string) => `dispatch:${locationId}`,
   cart: (cartId: string) => `cart:${cartId}`,
 };
 
@@ -43,6 +45,12 @@ export const EVENT_TYPES = [
   "cart.updated",
   /** A manager edited the menu: reload it. */
   "menu.changed",
+  /** The worker wrote a receipt (NFR-22). */
+  "receipt.issued",
+  /** A driver's position, for the dispatch map. */
+  "driver.location",
+  /** A driver went on or off shift. */
+  "driver.shift",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 

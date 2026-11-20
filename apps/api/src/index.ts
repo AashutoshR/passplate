@@ -4,6 +4,7 @@ import { createApp } from "./app";
 import { redisMenuCache } from "./cache";
 import { RedisStore } from "./rate-limit";
 import { expireUnpaid, type PaymentsConfig } from "./services/checkout";
+import { googleRoutes, straightRoutes } from "./services/maps";
 import { assertTestMode } from "./services/stripe";
 
 const port = Number(process.env.API_PORT ?? 4000);
@@ -39,6 +40,15 @@ function paymentsConfig(): PaymentsConfig {
 }
 const payments = paymentsConfig();
 
+// FR-20: Google's Routes API when a server key is set, straight lines otherwise.
+const routes = process.env.GOOGLE_MAPS_SERVER_KEY
+  ? googleRoutes({
+      apiKey: process.env.GOOGLE_MAPS_SERVER_KEY,
+      travelMode: process.env.GOOGLE_ROUTES_MODE,
+      log: (msg, extra) => console.log(JSON.stringify({ level: "warn", msg, ...extra })),
+    })
+  : straightRoutes;
+
 const app = createApp({
   db,
   dev: process.env.NODE_ENV !== "production",
@@ -47,11 +57,12 @@ const app = createApp({
   menuCache: redisMenuCache(redis),
   rateLimit: process.env.RATE_LIMIT === "off" ? undefined : { store: new RedisStore(redis), trustProxy: process.env.TRUST_PROXY === "1" },
   publicOrigin: process.env.PUBLIC_ORIGIN ?? `http://localhost:${webPort}`,
+  routes,
 });
 
 const server = Bun.serve({ port, fetch: (req, srv) => app.fetch(req, { server: srv }) });
 console.log(
-  JSON.stringify({ level: "info", msg: "api listening", port: server.port, payments: payments.provider, pooled: Boolean(pooledUrl) }),
+  JSON.stringify({ level: "info", msg: "api listening", port: server.port, payments: payments.provider, routes: routes.name, pooled: Boolean(pooledUrl) }),
 );
 
 // Unpaid collect and delivery orders give their stock back after 15 minutes.

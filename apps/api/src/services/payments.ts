@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
-import { diningTables, locations, orders, payments, users, type Db, type Executor } from "@pass/db";
+import { diningTables, locations, orders, payments, receipts, users, type Db, type Executor } from "@pass/db";
 import {
   channels,
   ORDER_TYPES,
@@ -19,11 +19,12 @@ type Order = typeof orders.$inferSelect;
 
 async function transactionView(db: Executor, paymentId: string): Promise<TransactionView> {
   const [row] = await db
-    .select({ p: payments, o: orders, tableLabel: diningTables.label, takenBy: users.name })
+    .select({ p: payments, o: orders, tableLabel: diningTables.label, takenBy: users.name, receiptNumber: receipts.number })
     .from(payments)
     .innerJoin(orders, eq(orders.id, payments.orderId))
     .leftJoin(diningTables, eq(diningTables.id, orders.tableId))
     .leftJoin(users, eq(users.id, payments.takenBy))
+    .leftJoin(receipts, eq(receipts.id, payments.receiptId))
     .where(eq(payments.id, paymentId));
   return toView(row!);
 }
@@ -33,6 +34,7 @@ function toView(row: {
   o: Order;
   tableLabel: string | null;
   takenBy: string | null;
+  receiptNumber: number | null;
 }): TransactionView {
   return {
     id: row.p.id,
@@ -52,6 +54,7 @@ function toView(row: {
       deliveryFeeMinor: row.o.deliveryFeeMinor,
     },
     takenBy: row.takenBy,
+    receipt: row.p.receiptId && row.receiptNumber !== null ? { id: row.p.receiptId, number: row.receiptNumber } : null,
   };
 }
 
@@ -65,6 +68,8 @@ export async function recordPayment(
   order: Order,
   method: PaymentMethod,
   takenBy: string | null,
+  /** Payments taken together share one, and so one receipt. */
+  batchId: string | null = null,
 ): Promise<OutboxEvent[]> {
   if (order.paidAt) return [];
   const [p] = await tx
@@ -76,6 +81,7 @@ export async function recordPayment(
       method,
       amountMinor: order.totalMinor,
       takenBy,
+      batchId,
     })
     .returning({ id: payments.id });
   await tx.update(orders).set({ paidAt: new Date(), updatedAt: new Date() }).where(eq(orders.id, order.id));
@@ -153,11 +159,12 @@ export async function listTransactions(db: Db, loc: Location, f: TransactionFilt
       if (f.method) conds.push(eq(payments.method, f.method));
       if (f.type) conds.push(eq(orders.type, f.type));
       const rows = await tx
-        .select({ p: payments, o: orders, tableLabel: diningTables.label, takenBy: users.name })
+        .select({ p: payments, o: orders, tableLabel: diningTables.label, takenBy: users.name, receiptNumber: receipts.number })
         .from(payments)
         .innerJoin(orders, eq(orders.id, payments.orderId))
         .leftJoin(diningTables, eq(diningTables.id, orders.tableId))
         .leftJoin(users, eq(users.id, payments.takenBy))
+        .leftJoin(receipts, eq(receipts.id, payments.receiptId))
         .where(and(...conds))
         .orderBy(desc(payments.createdAt))
         .limit(1000);

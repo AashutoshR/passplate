@@ -36,6 +36,13 @@
       "when": 1795163103082,
       "tag": "0004_order_number_sequences",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795173200850,
+      "tag": "0005_receipts_dispatch",
+      "breakpoints": true
     }
   ]
 }

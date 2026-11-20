@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import {
   TABLE_STATUSES,
   TABLE_STATUS_HINTS,
@@ -436,9 +437,22 @@ function TablePanel({
       )}
 
       {t.status === "clearing" && (
-        <button type="button" onClick={() => void post(`/v1/staff/floor/tables/${t.id}/clear`)} className="cta cta-dark mt-6 w-full px-5 py-4">
-          <span>Table is reset and ready</span>
-        </button>
+        <div className="mt-6 grid gap-2">
+          {t.settledOrderId && (
+            <Link
+              to="/staff/receipts/$id"
+              params={{ id: t.settledOrderId }}
+              search={{ order: 1 }}
+              className="cta cta-outline w-full px-5 py-3"
+              id="print-table-receipt"
+            >
+              <span>Print receipt</span>
+            </Link>
+          )}
+          <button type="button" onClick={() => void post(`/v1/staff/floor/tables/${t.id}/clear`)} className="cta cta-dark w-full px-5 py-4">
+            <span>Table is reset and ready</span>
+          </button>
+        </div>
       )}
     </div>
   );

@@ -1,6 +1,8 @@
-import { asc, eq, inArray, max } from "drizzle-orm";
-import { diningTables, orderItems, orders, outbox, users, type Executor } from "@pass/db";
-import type { PaymentProvider, TicketView } from "@pass/shared";
+import { and, asc, desc, eq, inArray, isNotNull, max } from "drizzle-orm";
+import { diningTables, orderItems, orders, outbox, payments, receipts, users, type Executor } from "@pass/db";
+import { distanceKm, type DeliveryProof, type PaymentProvider, type TicketView } from "@pass/shared";
+
+const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
 /** Loads orders with their items as ticket views, in the order of `ids`. */
 export async function loadTickets(db: Executor, ids: string[]): Promise<TicketView[]> {
@@ -16,6 +18,15 @@ export async function loadTickets(db: Executor, ids: string[]): Promise<TicketVi
     .from(orderItems)
     .where(inArray(orderItems.orderId, ids))
     .orderBy(asc(orderItems.position));
+  // The newest receipt for each order (a refund's comes after the sale's).
+  const receiptRows = await db
+    .select({ orderId: payments.orderId, id: receipts.id, number: receipts.number })
+    .from(payments)
+    .innerJoin(receipts, eq(receipts.id, payments.receiptId))
+    .where(and(inArray(payments.orderId, ids), isNotNull(payments.receiptId)))
+    .orderBy(desc(receipts.number));
+  const receiptOf = new Map<string, { id: string; number: number }>();
+  for (const r of receiptRows) if (!receiptOf.has(r.orderId)) receiptOf.set(r.orderId, { id: r.id, number: r.number });
 
   const byId = new Map(
     rows.map(({ order, tableLabel, driverName }) => [
@@ -50,13 +61,43 @@ export async function loadTickets(db: Executor, ids: string[]): Promise<TicketVi
                 lng: order.deliveryLng,
                 instructions: order.deliveryInstructions,
                 phone: order.phone,
+                driverId: order.driverId,
                 driverName,
                 driver:
                   order.driverLat !== null && order.driverLng !== null && order.driverAt
                     ? { lat: order.driverLat, lng: order.driverLng, at: order.driverAt.toISOString() }
                     : null,
+                assignedAt: iso(order.assignedAt),
+                pickedUpAt: iso(order.pickedUpAt),
+                deliveredAt: iso(order.deliveredAt),
+                arrivingAt: iso(order.arrivingAt),
+                etaAt: iso(order.etaAt),
+                route:
+                  order.routeProvider && order.routeDistanceM !== null && order.routeDurationS !== null
+                    ? {
+                        provider: order.routeProvider === "google" ? "google" : "straight",
+                        polyline: order.routePolyline,
+                        distanceM: order.routeDistanceM,
+                        durationS: order.routeDurationS,
+                      }
+                    : null,
+                proof: order.proofKind
+                  ? {
+                      kind: order.proofKind as DeliveryProof,
+                      note: order.proofNote,
+                      lat: order.proofLat,
+                      lng: order.proofLng,
+                      distanceM:
+                        order.proofLat !== null && order.proofLng !== null
+                          ? Math.round(
+                              distanceKm({ lat: order.proofLat, lng: order.proofLng }, { lat: order.deliveryLat, lng: order.deliveryLng }) * 1000,
+                            )
+                          : null,
+                    }
+                  : null,
               }
             : null,
+        receipt: receiptOf.get(order.id) ?? null,
       } satisfies TicketView as TicketView,
     ]),
   );

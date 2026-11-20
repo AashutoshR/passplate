@@ -23,6 +23,7 @@ import {
   TABLE_SHAPES,
   USER_ROLES,
   type OpeningHours,
+  type ReceiptBody,
 } from "@pass/shared";
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -64,6 +65,14 @@ export const locations = pgTable("locations", {
   lat: doublePrecision("lat").notNull().default(51.4495),
   lng: doublePrecision("lng").notNull().default(-2.5967),
   targetPrepSeconds: integer("target_prep_seconds").notNull().default(900),
+  /** What a receipt prints at the top. */
+  legalName: text("legal_name"),
+  /** One line per row, as printed. */
+  address: text("address").array().notNull().default(sql`'{}'::text[]`),
+  phone: text("phone"),
+  vatNumber: text("vat_number"),
+  /** VAT on food served hot, in basis points: 2000 is 20%. Prices include it. */
+  vatRateBp: integer("vat_rate_bp").notNull().default(2000),
   createdAt: createdAt(),
 });
 
@@ -209,6 +218,24 @@ export const orders = pgTable(
     driverLat: doublePrecision("driver_lat"),
     driverLng: doublePrecision("driver_lng"),
     driverAt: timestamp("driver_at", { withTimezone: true }),
+    /** A dispatcher gave the delivery to driverId before it left (FR-15). */
+    assignedAt: timestamp("assigned_at", { withTimezone: true }),
+    pickedUpAt: timestamp("picked_up_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    /** The driver came within 200 m of the door (FR-18). */
+    arrivingAt: timestamp("arriving_at", { withTimezone: true }),
+    etaAt: timestamp("eta_at", { withTimezone: true }),
+    etaUpdatedAt: timestamp("eta_updated_at", { withTimezone: true }),
+    /** google or straight. Fetched once when the driver sets off and kept (NFR-20). */
+    routeProvider: text("route_provider"),
+    routePolyline: text("route_polyline"),
+    routeDistanceM: integer("route_distance_m"),
+    routeDurationS: integer("route_duration_s"),
+    /** Proof of delivery: how it was left, a note, and where the phone was. */
+    proofKind: text("proof_kind"),
+    proofNote: text("proof_note"),
+    proofLat: doublePrecision("proof_lat"),
+    proofLng: doublePrecision("proof_lng"),
     currency: text("currency").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
     requestHash: text("request_hash").notNull(),
@@ -225,6 +252,7 @@ export const orders = pgTable(
     // enum value cannot sit in the migration that adds it.)
     index("orders_unpaid_idx").on(t.paymentExpiresAt).where(sql`${t.paymentExpiresAt} is not null`),
     uniqueIndex("orders_payment_ref_uq").on(t.paymentRef),
+    index("orders_delivered_idx").on(t.locationId, t.deliveredAt).where(sql`${t.deliveredAt} is not null`),
   ],
 );
 
@@ -366,13 +394,65 @@ export const payments = pgTable(
     method: paymentMethod("method").notNull(),
     amountMinor: integer("amount_minor").notNull(),
     takenBy: uuid("taken_by").references(() => users.id),
+    /** Payments taken together (a whole table settled at once) share one, and one receipt. */
+    batchId: uuid("batch_id"),
+    /** Set by the worker when it writes the receipt (NFR-22). */
+    receiptId: uuid("receipt_id"),
     createdAt: createdAt(),
   },
   (t) => [
     index("payments_location_created_idx").on(t.locationId, t.createdAt),
     index("payments_order_idx").on(t.orderId),
+    // What the receipt worker looks for: stays as small as the backlog.
+    index("payments_unreceipted_idx").on(t.createdAt).where(sql`${t.receiptId} is null`),
   ],
 );
+
+/**
+ * Receipts, written once by the worker and never changed (NFR-22). Numbers are
+ * gap-free per restaurant. The body is a frozen copy of what was printed.
+ */
+export const receipts = pgTable(
+  "receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    locationId: uuid("location_id")
+      .notNull()
+      .references(() => locations.id),
+    number: integer("number").notNull(),
+    kind: text("kind").notNull().$type<"sale" | "refund">(),
+    orderIds: uuid("order_ids").array().notNull(),
+    totalMinor: integer("total_minor").notNull(),
+    body: jsonb("body").$type<ReceiptBody>().notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
+    printedCount: integer("printed_count").notNull().default(0),
+    lastPrintedAt: timestamp("last_printed_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("receipts_location_number_uq").on(t.locationId, t.number),
+    index("receipts_location_issued_idx").on(t.locationId, t.issuedAt),
+    index("receipts_orders_idx").using("gin", t.orderIds),
+  ],
+);
+
+/**
+ * Who is driving tonight. Position is only what the phone sent during a
+ * delivery (FR-16): nobody is tracked between jobs, so an idle driver's
+ * position is where their last drop-off was.
+ */
+export const driverShifts = pgTable("driver_shifts", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  locationId: uuid("location_id")
+    .notNull()
+    .references(() => locations.id),
+  onShift: boolean("on_shift").notNull().default(false),
+  lat: doublePrecision("lat"),
+  lng: doublePrecision("lng"),
+  positionAt: timestamp("position_at", { withTimezone: true }),
+  updatedAt: updatedAt(),
+});
 
 export const reservations = pgTable(
   "reservations",

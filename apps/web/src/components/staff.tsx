@@ -9,7 +9,9 @@ import { Logo } from "./brand";
 const TABS: { to: string; label: string; roles: UserRole[] }[] = [
   { to: "/staff/floor", label: "Floor", roles: ["staff", "admin"] },
   { to: "/kitchen/passplate", label: "Kitchen", roles: ["staff", "admin"] },
+  { to: "/staff/dispatch", label: "Dispatch", roles: ["staff", "admin"] },
   { to: "/staff/driver", label: "Deliveries", roles: ["driver", "admin"] },
+  { to: "/staff/receipts", label: "Receipts", roles: ["staff", "admin"] },
   { to: "/staff/admin", label: "Admin", roles: ["admin"] },
   { to: "/staff/tables", label: "Table codes", roles: ["staff", "admin"] },
 ];

@@ -217,6 +217,50 @@ if (!only.length || only.some((o) => ["account-signed", "delivery", "checkout", 
   await evaluate(`fetch("/api/v1/account/logout", { method: "POST" })`);
 }
 
+// Deliveries and receipts: run `bun scripts/drivers.ts` first so there is something on the road.
+if (!only.length || only.some((o) => ["dispatch", "receipt", "day-report", "driver-proof", "tracking"].some((p) => p.startsWith(o) || o.startsWith(p)))) {
+  await open(`${WEB}/visit`, desktop, 1500);
+  await signIn("staff");
+  await single("dispatch-desktop", `${WEB}/staff/dispatch`, wide, 8000);
+  await single(
+    "dispatch-assign-desktop",
+    `${WEB}/staff/dispatch`,
+    wide,
+    8000,
+    `[...document.querySelectorAll("aside button[aria-pressed]")].find((b) => b.textContent.includes("Not assigned"))?.click()`,
+  );
+  type Board = {
+    delivered: { id: string; receipt: { id: string } | null }[];
+    onTheRoad: { id: string; delivery: { driverName: string } }[];
+  };
+  const board = await evaluate<Board>(`fetch("/api/v1/staff/dispatch").then((r) => r.json())`);
+  await single("receipts-desktop", `${WEB}/staff/receipts`, desktop);
+  const done = board.delivered.find((t) => t.receipt);
+  if (done) {
+    await single("receipt-staff-desktop", `${WEB}/staff/receipts/${done.receipt!.id}`, desktop);
+    await single("receipt-phone", `${WEB}/receipt/${done.id}`, phone);
+    await single("delivered-phone", `${WEB}/order/${done.id}`, phone);
+  }
+  const out = board.onTheRoad[0];
+  if (out) {
+    await single("tracking-phone", `${WEB}/order/${out.id}`, phone, 9000, `document.querySelector("[aria-label=\\"Delivery map\\"]")?.scrollIntoView({ block: "center" })`);
+    const role = (Object.keys(DEMO_ACCOUNTS) as (keyof typeof DEMO_ACCOUNTS)[]).find((k) => DEMO_ACCOUNTS[k].name === out.delivery.driverName);
+    if (role) {
+      await signIn(role);
+      await single(
+        "driver-proof-phone",
+        `${WEB}/staff/driver`,
+        phone,
+        7000,
+        `(async () => { document.querySelector("#delivered")?.click(); await new Promise((r) => setTimeout(r, 500)); document.querySelector("#proof")?.scrollIntoView({ block: "center" }); })()`,
+      );
+    }
+  }
+  await signIn("admin");
+  await single("day-report-desktop", `${WEB}/staff/receipts/day`, desktop);
+  await evaluate(`fetch("/api/v1/account/logout", { method: "POST" })`);
+}
+
 // The kitchen signs in with its own staff account, then the board and the newest order.
 await open(`${WEB}/visit`, desktop, 1500);
 await signIn("kitchen");

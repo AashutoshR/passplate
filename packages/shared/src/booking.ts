@@ -138,6 +138,8 @@ export interface TableView {
   /** Unpaid food and drink on the table. */
   openMinor: number;
   activeOrders: number;
+  /** While the table is being cleared: an order on the bill just paid, to print its receipt. */
+  settledOrderId: string | null;
 }
 
 export interface WaitlistEntryView {

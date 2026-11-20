@@ -4,8 +4,11 @@ import { Link } from "@tanstack/react-router";
 import {
   channels,
   customerSteps,
+  decodePolyline,
   distanceKm,
   formatMoney,
+  PROOF_LABEL,
+  receiptCode,
   rideMinutes,
   type DriverLocation,
   type OrderStatus,
@@ -18,7 +21,9 @@ import { PaymentPanel } from "../components/payment";
 import { RealtimeClient, type LinkStatus } from "../lib/realtime";
 import { SITE } from "../lib/site";
 import { Logo } from "../components/brand";
-import { MapView } from "../components/map";
+import { MapView, type Line } from "../components/map";
+
+const clock = (iso: string) => new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 
 /** Live order status for the diner (FR-9). */
 export const Route = createFileRoute("/order/$id")({
@@ -60,7 +65,17 @@ function OrderStatusPage() {
   const moveDriver = useCallback(
     (p: DriverLocation) =>
       setTicket((cur) =>
-        cur.delivery ? { ...cur, delivery: { ...cur.delivery, driver: { lat: p.lat, lng: p.lng, at: p.at } } } : cur,
+        cur.delivery
+          ? {
+              ...cur,
+              delivery: {
+                ...cur.delivery,
+                driver: { lat: p.lat, lng: p.lng, at: p.at },
+                etaAt: p.etaAt ?? cur.delivery.etaAt,
+                arrivingAt: cur.delivery.arrivingAt ?? (p.arriving ? p.at : null),
+              },
+            }
+          : cur,
       ),
     [],
   );
@@ -78,6 +93,8 @@ function OrderStatusPage() {
       onEvent: (e) => {
         if (e.type === "order.updated") apply(e.payload as TicketView);
         if (e.type === "order.driver_location") moveDriver(e.payload as DriverLocation);
+        // The worker has written the receipt: fetch the order to pick up its number.
+        if (e.type === "receipt.issued") void reload();
       },
       onResync: reload,
       onStatus: setLink,
@@ -102,6 +119,29 @@ function OrderStatusPage() {
     if (["completed", "delivered"].includes(ticket.status)) void refresh();
   }, [ticket.status, refresh]);
 
+  // FR-18: tell the guest the driver is nearly there, even if the tab is in the background.
+  const arriving = Boolean(ticket.delivery?.arrivingAt) && ticket.status === "out_for_delivery";
+  useEffect(() => {
+    if (!arriving) return;
+    const before = document.title;
+    document.title = "Nearly there · PassPlate";
+    try {
+      navigator.vibrate?.([120, 80, 120]);
+    } catch {
+      // Not every phone allows it.
+    }
+    return () => {
+      document.title = before;
+    };
+  }, [arriving]);
+
+  // Paid but no receipt yet: the worker writes it within a second or so.
+  useEffect(() => {
+    if (!ticket.paid || ticket.receipt) return;
+    const t = setTimeout(() => void reload().catch(() => {}), 2500);
+    return () => clearTimeout(t);
+  }, [ticket.paid, ticket.receipt, reload]);
+
   // Fallback while live updates are paused or the phone reconnects.
   useEffect(() => {
     if (link === "live") return;
@@ -119,6 +159,17 @@ function OrderStatusPage() {
   const d = ticket.delivery;
   const out = ticket.status === "out_for_delivery";
   const driverKm = d?.driver ? distanceKm(d.driver, d) : null;
+  const etaMin = d?.etaAt
+    ? Math.max(1, Math.round((Date.parse(d.etaAt) - Date.now()) / 60_000))
+    : driverKm !== null
+      ? rideMinutes(driverKm)
+      : null;
+  // The road route once the driver has set off; a dashed straight guide without one.
+  const lines: Line[] = [];
+  if (d && out) {
+    if (d.route?.polyline) lines.push({ id: "route", kind: "route", points: decodePolyline(d.route.polyline) });
+    else if (d.driver) lines.push({ id: "guide", kind: "planned", points: [d.driver, d] });
+  }
   const whereLabel = ticket.tableLabel
     ? `${ticket.tableLabel} · ${ticket.customerName}`
     : ticket.type === "delivery"
@@ -171,12 +222,23 @@ function OrderStatusPage() {
                   ? "Packed and waiting for a rider."
                   : "On its way to your table."
               : out && d
-                ? `${d.driverName ?? "Your rider"} is on the way${driverKm !== null ? `, about ${rideMinutes(driverKm)} minutes out` : ""}.`
-                : ticket.status === "delivered"
+                ? arriving
+                  ? `${d.driverName ?? "Your rider"} is nearly there. Keep an eye on the door.`
+                  : `${d.driverName ?? "Your rider"} is on the way${etaMin !== null ? `, arriving in about ${etaMin} minute${etaMin === 1 ? "" : "s"}` : ""}${d.etaAt ? ` (around ${clock(d.etaAt)})` : ""}.`
+                : ticket.status === "delivered" && d?.deliveredAt
+                  ? `Delivered at ${clock(d.deliveredAt)}${d.proof ? `. ${PROOF_LABEL[d.proof.kind]}` : ""}${d.proof?.note ? `: “${d.proof.note}”` : ""}. Enjoy.`
+                  : ticket.status === "delivered"
                   ? "Enjoy. Thank you for ordering."
                   : (STATUS_HINT[ticket.status] ?? "This page moves on by itself as the kitchen works.")}
         </p>
       </div>
+
+      {arriving && (
+        <p role="status" className="fade-up mt-8 flex items-center gap-3 border-2 border-espresso bg-gilt/40 px-5 py-4 text-lg">
+          <span className="pulse-dot size-2.5 shrink-0 rounded-full bg-[#2f7a55]" aria-hidden="true" />
+          Your driver is less than 200 m away.
+        </p>
+      )}
 
       {awaiting && <PaymentPanel ticket={ticket} onPaid={apply} />}
 
@@ -213,6 +275,7 @@ function OrderStatusPage() {
             className="aspect-[4/3] w-full border border-espresso/15"
             fit
             interactive
+            lines={lines}
             pins={[
               { id: "restaurant", kind: "restaurant", lat: SITE.coords.lat, lng: SITE.coords.lng, label: "PassPlate" },
               { id: "home", kind: "home", lat: d.lat, lng: d.lng, label: "You" },
@@ -283,6 +346,23 @@ function OrderStatusPage() {
           <span className="tabular font-serif text-2xl">{money(ticket.totalMinor)}</span>
         </div>
       </article>
+
+      {ticket.paid && (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border border-espresso/15 bg-cream px-5 py-4">
+          {ticket.receipt ? (
+            <>
+              <span className="text-umber">
+                Receipt <span className="tabular">{receiptCode(ticket.receipt.number)}</span>
+              </span>
+              <Link to="/receipt/$orderId" params={{ orderId: ticket.id }} className="cta cta-outline px-5 py-2.5" id="receipt-link">
+                <span>View or print receipt</span>
+              </Link>
+            </>
+          ) : (
+            <span className="text-umber">Preparing your receipt…</span>
+          )}
+        </div>
+      )}
 
       {user && rewards && user.role === "customer" && (
         <p className="mt-8 border border-brass/60 bg-brass/10 px-5 py-4 text-center text-umber">

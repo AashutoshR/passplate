@@ -20,12 +20,17 @@ import { Route as JoinTokenRouteImport } from './routes/join.$token'
 import { Route as KitchenSlugRouteImport } from './routes/kitchen.$slug'
 import { Route as OrderIdRouteImport } from './routes/order.$id'
 import { Route as RSlugRouteImport } from './routes/r.$slug'
+import { Route as ReceiptOrderIdRouteImport } from './routes/receipt.$orderId'
 import { Route as StaffIndexRouteImport } from './routes/staff.index'
 import { Route as StaffAdminRouteImport } from './routes/staff.admin'
+import { Route as StaffDispatchRouteImport } from './routes/staff.dispatch'
 import { Route as StaffDriverRouteImport } from './routes/staff.driver'
 import { Route as StaffFloorRouteImport } from './routes/staff.floor'
 import { Route as StaffTablesRouteImport } from './routes/staff.tables'
 import { Route as TTokenRouteImport } from './routes/t.$token'
+import { Route as StaffReceiptsIndexRouteImport } from './routes/staff.receipts.index'
+import { Route as StaffReceiptsIdRouteImport } from './routes/staff.receipts.$id'
+import { Route as StaffReceiptsDayRouteImport } from './routes/staff.receipts.day'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -82,6 +87,11 @@ const RSlugRoute = RSlugRouteImport.update({
   path: '/r/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReceiptOrderIdRoute = ReceiptOrderIdRouteImport.update({
+  id: '/receipt/$orderId',
+  path: '/receipt/$orderId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StaffIndexRoute = StaffIndexRouteImport.update({
   id: '/staff/',
   path: '/staff/',
@@ -90,6 +100,11 @@ const StaffIndexRoute = StaffIndexRouteImport.update({
 const StaffAdminRoute = StaffAdminRouteImport.update({
   id: '/staff/admin',
   path: '/staff/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StaffDispatchRoute = StaffDispatchRouteImport.update({
+  id: '/staff/dispatch',
+  path: '/staff/dispatch',
   getParentRoute: () => rootRouteImport,
 } as any)
 const StaffDriverRoute = StaffDriverRouteImport.update({
@@ -112,6 +127,21 @@ const TTokenRoute = TTokenRouteImport.update({
   path: '/t/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StaffReceiptsIndexRoute = StaffReceiptsIndexRouteImport.update({
+  id: '/staff/receipts/',
+  path: '/staff/receipts/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StaffReceiptsIdRoute = StaffReceiptsIdRouteImport.update({
+  id: '/staff/receipts/$id',
+  path: '/staff/receipts/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StaffReceiptsDayRoute = StaffReceiptsDayRouteImport.update({
+  id: '/staff/receipts/day',
+  path: '/staff/receipts/day',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -125,12 +155,17 @@ export interface FileRoutesByFullPath {
   '/kitchen/$slug': typeof KitchenSlugRoute
   '/order/$id': typeof OrderIdRoute
   '/r/$slug': typeof RSlugRoute
+  '/receipt/$orderId': typeof ReceiptOrderIdRoute
   '/staff/admin': typeof StaffAdminRoute
+  '/staff/dispatch': typeof StaffDispatchRoute
   '/staff/driver': typeof StaffDriverRoute
   '/staff/floor': typeof StaffFloorRoute
   '/staff/tables': typeof StaffTablesRoute
   '/t/$token': typeof TTokenRoute
   '/staff/': typeof StaffIndexRoute
+  '/staff/receipts/$id': typeof StaffReceiptsIdRoute
+  '/staff/receipts/day': typeof StaffReceiptsDayRoute
+  '/staff/receipts/': typeof StaffReceiptsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -144,12 +179,17 @@ export interface FileRoutesByTo {
   '/kitchen/$slug': typeof KitchenSlugRoute
   '/order/$id': typeof OrderIdRoute
   '/r/$slug': typeof RSlugRoute
+  '/receipt/$orderId': typeof ReceiptOrderIdRoute
   '/staff/admin': typeof StaffAdminRoute
+  '/staff/dispatch': typeof StaffDispatchRoute
   '/staff/driver': typeof StaffDriverRoute
   '/staff/floor': typeof StaffFloorRoute
   '/staff/tables': typeof StaffTablesRoute
   '/t/$token': typeof TTokenRoute
   '/staff': typeof StaffIndexRoute
+  '/staff/receipts/$id': typeof StaffReceiptsIdRoute
+  '/staff/receipts/day': typeof StaffReceiptsDayRoute
+  '/staff/receipts': typeof StaffReceiptsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -164,12 +204,17 @@ export interface FileRoutesById {
   '/kitchen/$slug': typeof KitchenSlugRoute
   '/order/$id': typeof OrderIdRoute
   '/r/$slug': typeof RSlugRoute
+  '/receipt/$orderId': typeof ReceiptOrderIdRoute
   '/staff/admin': typeof StaffAdminRoute
+  '/staff/dispatch': typeof StaffDispatchRoute
   '/staff/driver': typeof StaffDriverRoute
   '/staff/floor': typeof StaffFloorRoute
   '/staff/tables': typeof StaffTablesRoute
   '/t/$token': typeof TTokenRoute
   '/staff/': typeof StaffIndexRoute
+  '/staff/receipts/$id': typeof StaffReceiptsIdRoute
+  '/staff/receipts/day': typeof StaffReceiptsDayRoute
+  '/staff/receipts/': typeof StaffReceiptsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -185,12 +230,17 @@ export interface FileRouteTypes {
     | '/kitchen/$slug'
     | '/order/$id'
     | '/r/$slug'
+    | '/receipt/$orderId'
     | '/staff/admin'
+    | '/staff/dispatch'
     | '/staff/driver'
     | '/staff/floor'
     | '/staff/tables'
     | '/t/$token'
     | '/staff/'
+    | '/staff/receipts/$id'
+    | '/staff/receipts/day'
+    | '/staff/receipts/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -204,12 +254,17 @@ export interface FileRouteTypes {
     | '/kitchen/$slug'
     | '/order/$id'
     | '/r/$slug'
+    | '/receipt/$orderId'
     | '/staff/admin'
+    | '/staff/dispatch'
     | '/staff/driver'
     | '/staff/floor'
     | '/staff/tables'
     | '/t/$token'
     | '/staff'
+    | '/staff/receipts/$id'
+    | '/staff/receipts/day'
+    | '/staff/receipts'
   id:
     | '__root__'
     | '/'
@@ -223,12 +278,17 @@ export interface FileRouteTypes {
     | '/kitchen/$slug'
     | '/order/$id'
     | '/r/$slug'
+    | '/receipt/$orderId'
     | '/staff/admin'
+    | '/staff/dispatch'
     | '/staff/driver'
     | '/staff/floor'
     | '/staff/tables'
     | '/t/$token'
     | '/staff/'
+    | '/staff/receipts/$id'
+    | '/staff/receipts/day'
+    | '/staff/receipts/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -243,12 +303,17 @@ export interface RootRouteChildren {
   KitchenSlugRoute: typeof KitchenSlugRoute
   OrderIdRoute: typeof OrderIdRoute
   RSlugRoute: typeof RSlugRoute
+  ReceiptOrderIdRoute: typeof ReceiptOrderIdRoute
   StaffAdminRoute: typeof StaffAdminRoute
+  StaffDispatchRoute: typeof StaffDispatchRoute
   StaffDriverRoute: typeof StaffDriverRoute
   StaffFloorRoute: typeof StaffFloorRoute
   StaffTablesRoute: typeof StaffTablesRoute
   TTokenRoute: typeof TTokenRoute
   StaffIndexRoute: typeof StaffIndexRoute
+  StaffReceiptsIdRoute: typeof StaffReceiptsIdRoute
+  StaffReceiptsDayRoute: typeof StaffReceiptsDayRoute
+  StaffReceiptsIndexRoute: typeof StaffReceiptsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -330,6 +395,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/receipt/$orderId': {
+      id: '/receipt/$orderId'
+      path: '/receipt/$orderId'
+      fullPath: '/receipt/$orderId'
+      preLoaderRoute: typeof ReceiptOrderIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/staff/': {
       id: '/staff/'
       path: '/staff'
@@ -342,6 +414,13 @@ declare module '@tanstack/react-router' {
       path: '/staff/admin'
       fullPath: '/staff/admin'
       preLoaderRoute: typeof StaffAdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/staff/dispatch': {
+      id: '/staff/dispatch'
+      path: '/staff/dispatch'
+      fullPath: '/staff/dispatch'
+      preLoaderRoute: typeof StaffDispatchRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/staff/driver': {
@@ -372,6 +451,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/staff/receipts/': {
+      id: '/staff/receipts/'
+      path: '/staff/receipts'
+      fullPath: '/staff/receipts/'
+      preLoaderRoute: typeof StaffReceiptsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/staff/receipts/$id': {
+      id: '/staff/receipts/$id'
+      path: '/staff/receipts/$id'
+      fullPath: '/staff/receipts/$id'
+      preLoaderRoute: typeof StaffReceiptsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/staff/receipts/day': {
+      id: '/staff/receipts/day'
+      path: '/staff/receipts/day'
+      fullPath: '/staff/receipts/day'
+      preLoaderRoute: typeof StaffReceiptsDayRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -387,12 +487,17 @@ const rootRouteChildren: RootRouteChildren = {
   KitchenSlugRoute: KitchenSlugRoute,
   OrderIdRoute: OrderIdRoute,
   RSlugRoute: RSlugRoute,
+  ReceiptOrderIdRoute: ReceiptOrderIdRoute,
   StaffAdminRoute: StaffAdminRoute,
+  StaffDispatchRoute: StaffDispatchRoute,
   StaffDriverRoute: StaffDriverRoute,
   StaffFloorRoute: StaffFloorRoute,
   StaffTablesRoute: StaffTablesRoute,
   TTokenRoute: TTokenRoute,
   StaffIndexRoute: StaffIndexRoute,
+  StaffReceiptsIdRoute: StaffReceiptsIdRoute,
+  StaffReceiptsDayRoute: StaffReceiptsDayRoute,
+  StaffReceiptsIndexRoute: StaffReceiptsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

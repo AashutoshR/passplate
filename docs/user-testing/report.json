@@ -4,113 +4,125 @@
       "persona": "Maya",
       "step": "opens the home page on her phone",
       "ok": true,
-      "ms": 4523
+      "ms": 5190
     },
     {
       "persona": "Maya",
       "step": "picks 4 guests in the booking bar and taps Find a table",
       "ok": true,
-      "ms": 806
+      "ms": 1189
     },
     {
       "persona": "Maya",
       "step": "finds a free time",
       "ok": true,
-      "ms": 1192
+      "ms": 2202
     },
     {
       "persona": "Maya",
       "step": "fills in her details",
       "ok": true,
-      "ms": 732
+      "ms": 799
     },
     {
       "persona": "Maya",
       "step": "confirms the booking",
       "ok": true,
-      "ms": 576
+      "ms": 573
     },
     {
       "persona": "Maya",
       "step": "cancels the booking",
       "ok": true,
-      "ms": 1117
+      "ms": 1213
     },
     {
       "persona": "Sam",
       "step": "signs in",
       "ok": true,
-      "ms": 3445
+      "ms": 3926
     },
     {
       "persona": "Sam",
       "step": "sees 7 of 8 stamps",
       "ok": true,
-      "ms": 2
+      "ms": 551
     },
     {
       "persona": "Sam",
       "step": "orders a Margherita to collect and pays",
       "ok": true,
-      "ms": 7552
+      "ms": 12409
     },
     {
       "persona": "Sam",
       "step": "the kitchen cooks it and he collects it",
       "ok": true,
-      "ms": 1985
+      "ms": 2384
     },
     {
       "persona": "Sam",
       "step": "the eighth stamp turns into a reward",
       "ok": true,
-      "ms": 2
+      "ms": 5
     },
     {
       "persona": "Sam",
       "step": "spends the reward on the next order",
       "ok": true,
-      "ms": 8792
+      "ms": 18627
     },
     {
       "persona": "Priya",
       "step": "creates an account",
       "ok": true,
-      "ms": 4318
+      "ms": 9740
     },
     {
       "persona": "Priya",
       "step": "switches to delivery and fills a basket",
       "ok": true,
-      "ms": 6911
+      "ms": 6749
     },
     {
       "persona": "Priya",
       "step": "finds her address by postcode",
       "ok": true,
-      "ms": 1173
+      "ms": 1034
     },
     {
       "persona": "Priya",
       "step": "pays: her first card is declined, the second goes through",
       "ok": true,
-      "ms": 2599
+      "ms": 2566
     },
     {
       "persona": "Dee",
-      "step": "signs in on the driver screen",
+      "step": "signs in on the driver screen and starts her shift",
       "ok": true,
-      "ms": 3421
+      "ms": 4916
+    },
+    {
+      "persona": "Marco (dispatch)",
+      "step": "opens the dispatch map and gives Priya's order to Dee",
+      "ok": true,
+      "ms": 4838
+    },
+    {
+      "persona": "Dee",
+      "step": "sees it given to her, live",
+      "ok": true,
+      "ms": 7
     },
     {
       "persona": "Priya",
       "step": "the kitchen cooks it",
       "ok": true,
-      "ms": 1198
+      "ms": 1364
     },
     {
       "persona": "Dee",
-      "step": "sees it ready (live) and takes it",
+      "step": "sees it ready and sets off",
       "ok": true,
       "ms": 536
     },
@@ -118,158 +130,188 @@
       "persona": "Dee",
       "step": "drives the route",
       "ok": true,
-      "ms": 537
+      "ms": 569
     },
     {
       "persona": "Priya",
-      "step": "watches the rider move on her map",
+      "step": "watches the rider move on her map, with an arrival time",
       "ok": true,
-      "ms": 8028
+      "ms": 8077
+    },
+    {
+      "persona": "Marco (dispatch)",
+      "step": "sees Dee moving on the dispatch map",
+      "ok": true,
+      "ms": 17
+    },
+    {
+      "persona": "Priya",
+      "step": "is told the rider is nearly there (within 200 m)",
+      "ok": true,
+      "ms": 8
     },
     {
       "persona": "Dee",
-      "step": "hands it over",
+      "step": "leaves it at the door and says so",
       "ok": true,
-      "ms": 531
+      "ms": 2156
     },
     {
       "persona": "Priya",
-      "step": "sees it delivered",
+      "step": "sees it delivered, with how it was left",
       "ok": true,
-      "ms": 23
+      "ms": 14
+    },
+    {
+      "persona": "Priya",
+      "step": "opens her receipt",
+      "ok": true,
+      "ms": 621
+    },
+    {
+      "persona": "Marco (dispatch)",
+      "step": "sees it under Delivered today, with the proof",
+      "ok": true,
+      "ms": 13
     },
     {
       "persona": "Marco",
       "step": "signs in and opens the floor",
       "ok": true,
-      "ms": 3045
+      "ms": 4319
     },
     {
       "persona": "Asha",
       "step": "signs in and opens transactions",
       "ok": true,
-      "ms": 3980
+      "ms": 4846
     },
     {
       "persona": "Marco",
       "step": "seats two walk-ins at Table 2",
       "ok": true,
-      "ms": 1097
+      "ms": 1108
     },
     {
       "persona": "Lena",
       "step": "scans the QR code at Table 2 and gives her name",
       "ok": true,
-      "ms": 4734
+      "ms": 3749
     },
     {
       "persona": "Theo",
       "step": "scans the QR code at Table 2 and gives his name",
       "ok": true,
-      "ms": 5010
+      "ms": 4256
     },
     {
       "persona": "Lena",
       "step": "adds Cacio e pepe",
       "ok": true,
-      "ms": 1952
+      "ms": 1804
     },
     {
       "persona": "Theo",
       "step": "adds an Aperol spritz",
       "ok": true,
-      "ms": 1705
+      "ms": 1660
     },
     {
       "persona": "Theo",
       "step": "sees Lena's dish in the table's order, live",
       "ok": true,
-      "ms": 1099
+      "ms": 630
     },
     {
       "persona": "Theo",
       "step": "sends the whole table's order to the kitchen",
       "ok": true,
-      "ms": 686
+      "ms": 1040
     },
     {
       "persona": "Lena",
       "step": "is told Theo sent it, without reloading",
       "ok": true,
-      "ms": 138
+      "ms": 20
     },
     {
       "persona": "Marco",
       "step": "sees the guests' QR order arrive without reloading",
       "ok": true,
-      "ms": 5
+      "ms": 2
     },
     {
       "persona": "Marco",
       "step": "the kitchen serves it; the table shows Eating",
       "ok": true,
-      "ms": 1869
+      "ms": 1786
     },
     {
       "persona": "Marco",
       "step": "settles the bill by card",
       "ok": true,
-      "ms": 1140
+      "ms": 1190
     },
     {
       "persona": "Asha",
       "step": "sees Marco's card payment appear live",
       "ok": true,
-      "ms": 5
+      "ms": 6
     },
     {
       "persona": "Asha",
       "step": "opens the overview: takings, two weeks of trade, best sellers",
       "ok": true,
-      "ms": 1272
+      "ms": 1098
     },
     {
       "persona": "Asha",
       "step": "raises the Tiramisu price in the menu editor",
       "ok": true,
-      "ms": 3114
+      "ms": 3473
     },
     {
       "persona": "Lena",
       "step": "sees the new price on her open menu, without reloading",
       "ok": true,
-      "ms": 4
+      "ms": 51
     },
     {
       "persona": "Asha",
       "step": "makes an invite link for a new kitchen hand",
       "ok": true,
-      "ms": 1714
+      "ms": 1586
     },
     {
       "persona": "Jo",
       "step": "opens the invite, chooses a password and is signed in",
       "ok": true,
-      "ms": 3825
+      "ms": 3899
     },
     {
       "persona": "Jo",
       "step": "opens the kitchen screen with that account",
       "ok": true,
-      "ms": 1317
+      "ms": 2170
+    },
+    {
+      "persona": "Marco",
+      "step": "the guests ask for a receipt: it is ready to print",
+      "ok": true,
+      "ms": 358
     },
     {
       "persona": "Marco",
       "step": "resets the table",
       "ok": true,
-      "ms": 533
+      "ms": 642
     },
     {
       "persona": "Crowd",
       "step": "30 guests book Saturday 2026-11-28 at 20:00 for four at the same moment",
       "ok": true,
-      "ms": 3830,
-      "note": "10 booked, each on a different table (Table 1, Table 9, Table 10, Table 14, Table 8, Table 13, Table 4, Table 2, Table 3, Table 7); 20 were told it had just been taken; 20:00 now shows as full."
+      "ms": 4766,
+      "note": "10 booked, each on a different table (Table 1, Table 13, Table 3, Table 7, Table 8, Table 10, Table 9, Table 4, Table 2, Table 14); 20 were told it had just been taken; 20:00 now shows as full."
     }
   ],
   "findings": [],
@@ -300,6 +342,11 @@
       "caption": "Priya's delivery checkout: address, fee and total"
     },
     {
+      "persona": "Marco (dispatch)",
+      "file": "marco-dispatch.jpg",
+      "caption": "Marco's dispatch map: Priya's order given to Dee"
+    },
+    {
       "persona": "Priya",
       "file": "priya-tracking.jpg",
       "caption": "Priya's order page: the rider moving towards her"
@@ -308,6 +355,16 @@
       "persona": "Dee",
       "file": "dee-route.jpg",
       "caption": "Dee's driver screen during the delivery"
+    },
+    {
+      "persona": "Priya",
+      "file": "priya-arriving.jpg",
+      "caption": "Priya's order page: the driver is nearly there"
+    },
+    {
+      "persona": "Priya",
+      "file": "priya-receipt.jpg",
+      "caption": "Priya's receipt, ready to print or save as a PDF"
     },
     {
       "persona": "Theo",

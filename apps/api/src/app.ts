@@ -29,6 +29,8 @@ import { mediaFile } from "./services/media";
 import { UUID_PATTERN } from "./util";
 import { loadUser, type SessionUser } from "./auth";
 import { accountRoutes, bookingRoutes, inviteRoutes, staffRoutes } from "./routes";
+import { straightRoutes, type RoutesProvider } from "./services/maps";
+import { receiptForOrder } from "./services/receipts";
 
 type Env = { Variables: { requestId: string; kitchen: KitchenLocation; user: SessionUser | null } };
 
@@ -48,6 +50,8 @@ export interface AppOptions {
   publicOrigin?: string;
   /** Where uploaded dish photos are kept. */
   uploadDir?: string;
+  /** Road routes for deliveries: Google when configured, else straight lines. */
+  routes?: RoutesProvider;
 }
 
 /** Routes whose bodies may be larger than the usual 64 KB. */
@@ -63,6 +67,7 @@ export function createApp({
   rateLimit: limiter,
   publicOrigin = `http://localhost:${webPort}`,
   uploadDir,
+  routes = straightRoutes,
 }: AppOptions) {
   const app = new Hono<Env>();
 
@@ -154,6 +159,14 @@ export function createApp({
     return c.json(await getOrder(db, id));
   });
 
+  // The guest's receipt, by the same private order link (NFR-22 writes it).
+  app.get("/v1/orders/:id/receipt", async (c) => {
+    const id = c.req.param("id");
+    if (!UUID_PATTERN.test(id)) throw new AppError(404, "order_not_found", "Order not found");
+    c.header("Cache-Control", "no-store");
+    return c.json(await receiptForOrder(db, id));
+  });
+
   // Paying for collect and delivery orders (FR-8).
   app.post("/v1/orders/:id/payment", async (c) => {
     const id = c.req.param("id");
@@ -202,7 +215,7 @@ export function createApp({
   app.route("/v1/kitchen", kitchen);
   app.route("/v1/account", accountRoutes(db));
   app.route("/v1", bookingRoutes(db));
-  app.route("/v1/staff", staffRoutes(db, { payments, publicOrigin, uploadDir }));
+  app.route("/v1/staff", staffRoutes(db, { payments, publicOrigin, uploadDir, routes }));
   app.route("/v1/invites", inviteRoutes(db));
 
   if (dev) {

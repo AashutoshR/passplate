@@ -23,6 +23,8 @@ export const DEMO_ACCOUNTS = {
   staff: { email: "floor@passplate.test", password: "passplate-floor", name: "Marco Rossi", role: "staff" },
   kitchen: { email: "kitchen@passplate.test", password: "passplate-kitchen", name: "Kitchen pass", role: "staff" },
   driver: { email: "driver@passplate.test", password: "passplate-driver", name: "Dee Okafor", role: "driver" },
+  driver2: { email: "tom@passplate.test", password: "passplate-driver", name: "Tom Becker", role: "driver" },
+  driver3: { email: "ines@passplate.test", password: "passplate-driver", name: "Ines Duarte", role: "driver" },
   customer: { email: "guest@passplate.test", password: "passplate-guest", name: "Sam Carter", role: "customer" },
 } as const;
 export type DemoAccount = keyof typeof DEMO_ACCOUNTS;
@@ -498,11 +500,23 @@ export interface SeedResult {
 
 /** Wipes all data and creates one demo restaurant. */
 export async function seedDemo(db: Db, opts: SeedOptions = {}): Promise<SeedResult> {
-  await db.execute(sql`
-    truncate table outbox, stripe_events, invites, table_cart_lines, table_carts, payments, rewards, sessions, waitlist, reservations, order_transitions,
-      order_items, orders, users, modifiers, modifier_groups, menu_items, menu_categories, dining_tables,
-      locations, tenants restart identity cascade
-  `);
+  // The running worker and API touch these tables too, in their own order, so
+  // wiping them all can deadlock with one of them. Postgres then cancels us:
+  // wait a moment and wipe again.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await db.execute(sql`
+        truncate table outbox, receipts, driver_shifts, stripe_events, invites, table_cart_lines, table_carts, payments, rewards, sessions, waitlist, reservations, order_transitions,
+          order_items, orders, users, modifiers, modifier_groups, menu_items, menu_categories, dining_tables,
+          locations, tenants restart identity cascade
+      `);
+      break;
+    } catch (err) {
+      const code = (err as { cause?: { code?: string }; code?: string }).cause?.code ?? (err as { code?: string }).code;
+      if (code !== "40P01" || attempt >= 8) throw err;
+      await new Promise((r) => setTimeout(r, 100 * attempt + Math.random() * 200));
+    }
+  }
   await dropOrderNumberSequences(db);
   const hashes = await hashDemoPasswords();
 
@@ -522,6 +536,12 @@ export async function seedDemo(db: Db, opts: SeedOptions = {}): Promise<SeedResu
         lat: 51.4497,
         lng: -2.5966,
         targetPrepSeconds: 15 * 60,
+        legalName: "PassPlate Kitchen Ltd",
+        address: ["14 Wharf Street", "Bristol BS1 4RN"],
+        phone: "0117 496 0123",
+        // A made-up number in the right shape, for the demo restaurant.
+        vatNumber: "GB 000 0000 00",
+        vatRateBp: 2000,
       })
       .returning();
     const locationId = location!.id;

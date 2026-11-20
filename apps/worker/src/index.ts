@@ -1,5 +1,6 @@
 import Redis from "ioredis";
 import postgres from "postgres";
+import { createDb, issuePendingReceipts } from "@pass/db";
 
 /**
  * Outbox relay (NFR-12).
@@ -26,6 +27,10 @@ const sql = postgres(DATABASE_URL, {
   onnotice: () => {},
   connection: { application_name: "pass-relay", statement_timeout: 5000 },
 });
+// Receipts are written here, off the request path (NFR-22).
+const RECEIPT_MS = Number(process.env.RECEIPT_POLL_MS ?? 400);
+const { db: receiptDb, sql: receiptSql } = createDb({ url: DATABASE_URL, max: 2, appName: "pass-receipts" });
+
 const redis = new Redis(REDIS_URL, { maxRetriesPerRequest: 2, enableOfflineQueue: false, lazyConnect: false });
 redis.on("error", () => {}); // Reconnects on its own; failures are logged where they matter.
 
@@ -117,6 +122,7 @@ async function run() {
   }
   if (stopping) return;
   log("info", "relay is leader");
+  void receiptLoop();
 
   // A notify that lands mid-batch sets `pending`, so the next round starts at once.
   let pending = true;
@@ -142,12 +148,26 @@ async function run() {
   lockConn.release();
 }
 
+async function receiptLoop() {
+  while (!stopping) {
+    try {
+      const n = await issuePendingReceipts(receiptDb);
+      if (n) log("info", "receipts issued", { count: n });
+      if (n >= 50) continue;
+    } catch (err) {
+      log("error", "receipt run failed", { error: String(err) });
+    }
+    await new Promise((r) => setTimeout(r, RECEIPT_MS));
+  }
+}
+
 async function shutdown() {
   if (stopping) return;
   stopping = true;
   wake?.();
   setTimeout(async () => {
     await sql.end({ timeout: 2 });
+    await receiptSql.end({ timeout: 2 });
     redis.disconnect();
     process.exit(0);
   }, 300);

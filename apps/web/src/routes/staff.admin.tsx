@@ -6,6 +6,7 @@ import {
   channels,
   formatMoney,
   localDate,
+  receiptCode,
   type AdminOverview,
   type GuestView,
   type InviteView,
@@ -267,7 +268,7 @@ function Transactions() {
     const client = new RealtimeClient({
       channels: [channels.admin(user.locationId)],
       since: data.seq,
-      onEvent: (e) => e.type === "payment.recorded" && void load(),
+      onEvent: (e) => (e.type === "payment.recorded" || e.type === "receipt.issued") && void load(),
       onResync: load,
     });
     client.start();
@@ -403,7 +404,7 @@ function Transactions() {
             <table className="w-full min-w-[880px] text-left">
               <thead className="border-b border-espresso/15 text-sm text-taupe">
                 <tr>
-                  {["Time", "Order", "Type", "Guest", "Method", "Taken by", "Amount", ""].map((h) => (
+                  {["Time", "Order", "Type", "Guest", "Method", "Taken by", "Receipt", "Amount", ""].map((h) => (
                     <th key={h} className={`px-4 py-3 font-normal ${h === "Amount" ? "text-right" : ""}`}>
                       {h}
                     </th>
@@ -413,7 +414,7 @@ function Transactions() {
               <tbody className="divide-y divide-espresso/10">
                 {data.transactions.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-10 text-center text-umber">
+                    <td colSpan={9} className="px-4 py-10 text-center text-umber">
                       No transactions for these filters.
                     </td>
                   </tr>
@@ -434,6 +435,15 @@ function Transactions() {
                     </td>
                     <td className="px-4 py-3">{METHOD_LABEL[t.method]}</td>
                     <td className="px-4 py-3 text-sm text-umber">{t.takenBy ?? (t.method === "online" ? "Online" : "")}</td>
+                    <td className="tabular px-4 py-3 text-sm">
+                      {t.receipt ? (
+                        <Link to="/staff/receipts/$id" params={{ id: t.receipt.id }} search={{ order: undefined }} className="draw text-espresso">
+                          {receiptCode(t.receipt.number)}
+                        </Link>
+                      ) : (
+                        <span className="text-taupe">Writing…</span>
+                      )}
+                    </td>
                     <td className={`tabular px-4 py-3 text-right ${t.kind === "refund" ? "text-[#8a2e1f]" : ""}`}>
                       {t.kind === "refund" ? `−${money(t.amountMinor)}` : money(t.amountMinor)}
                       {t.kind === "refund" && <span className="block text-xs">Refund</span>}

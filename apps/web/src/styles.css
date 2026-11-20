@@ -643,3 +643,94 @@ h3 {
     animation: none;
   }
 }
+
+/* Dispatch map pins: deliveries waiting for a driver, and ones done today. */
+button.map-pin {
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  position: relative;
+}
+.map-pin-waiting .map-pin-dot {
+  background: var(--color-cream);
+  border-color: var(--color-brass);
+  border-width: 4px;
+  border-radius: 3px;
+}
+.map-pin-done .map-pin-dot {
+  background: var(--color-taupe);
+  width: 11px;
+  height: 11px;
+  border-width: 2px;
+  opacity: 0.8;
+}
+.map-pin-done .map-pin-label {
+  display: none;
+}
+.map-pin-selected .map-pin-dot {
+  outline: 3px solid var(--color-espresso);
+  outline-offset: 2px;
+}
+.map-pin-selected .map-pin-label {
+  background: var(--color-espresso);
+  color: var(--color-cream);
+}
+
+/*
+ * Receipts print on an 80 mm till roll, or on A4 from a laptop: only the
+ * receipt is printed, black on white, nothing else from the page.
+ */
+.receipt-paper {
+  font-family: var(--font-mono, ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace);
+  font-size: 13px;
+  line-height: 1.45;
+  color: #111;
+  background: #fff;
+}
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 4mm;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+  .print-area {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 72mm;
+    margin: 0;
+    box-shadow: none !important;
+    border: 0 !important;
+    padding: 0 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* A plain text field on staff screens. */
+.field {
+  border: 1px solid rgb(23 36 30 / 0.25);
+  background: var(--color-cream);
+  padding: 0.7rem 0.85rem;
+  outline: none;
+}
+.field:focus {
+  border-color: var(--color-espresso);
+}
+
+/* A driver's name sits above the pin, so it never covers the restaurant's or the guest's below. */
+.map-pin-driver .map-pin-label {
+  top: auto;
+  bottom: calc(100% + 6px);
+}

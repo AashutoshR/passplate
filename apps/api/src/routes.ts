@@ -10,8 +10,12 @@ import {
   AvailabilityQuerySchema,
   BookTableSchema,
   CreateStaffSchema,
+  AssignSchema,
+  DeliveredSchema,
   DriverLocationSchema,
   LoginSchema,
+  ReceiptSearchSchema,
+  ShiftSchema,
   ORDER_TYPES,
   PAYMENT_METHODS,
   RegisterSchema,
@@ -51,7 +55,17 @@ import {
 } from "./services/accounts";
 import { adminOverview } from "./services/admin";
 import { availability, bookTable, changeReservation, maskPhone, reservationByCode } from "./services/booking";
-import { completeDelivery, driverBoard, takeDelivery, updateDriverLocation } from "./services/delivery";
+import {
+  assignDelivery,
+  completeDelivery,
+  dispatchBoard,
+  driverBoard,
+  setShift,
+  takeDelivery,
+  updateDriverLocation,
+} from "./services/delivery";
+import { straightRoutes, type RoutesProvider } from "./services/maps";
+import { dayReport, markPrinted, searchReceipts, staffReceipt, staffReceiptForOrder } from "./services/receipts";
 import { addToWaitlist, clearTable, floorSnapshot, leaveWaitlist, seatTable, settleTable } from "./services/floor";
 import { adminRefund, listTransactions } from "./services/payments";
 import type { PaymentsConfig } from "./services/checkout";
@@ -187,11 +201,12 @@ export function inviteRoutes(db: Db) {
 /** Everything behind a staff sign-in: the floor, deliveries and the admin screens. */
 export function staffRoutes(
   db: Db,
-  opts: { payments: PaymentsConfig; publicOrigin: string; uploadDir?: string } = {
+  opts: { payments: PaymentsConfig; publicOrigin: string; uploadDir?: string; routes?: RoutesProvider } = {
     payments: { provider: "test" },
     publicOrigin: "http://localhost:3000",
   },
 ) {
+  const routes = opts.routes ?? straightRoutes;
   const r = new Hono<AuthEnv>();
 
   async function myLocation(c: Context<AuthEnv>, roles: ("staff" | "driver" | "admin")[]) {
@@ -249,18 +264,73 @@ export function staffRoutes(
     c.header("Cache-Control", "no-store");
     return c.json(await driverBoard(db, loc, user.id));
   });
+  r.post("/driver/shift", async (c) => {
+    const { loc, user } = await myLocation(c, ["driver"]);
+    return c.json(await setShift(db, loc, user, parse(ShiftSchema, await readJson(c)).on));
+  });
   r.post("/driver/orders/:id/take", async (c) => {
     const { loc, user } = await myLocation(c, ["driver", "admin"]);
-    return c.json(await takeDelivery(db, loc, uuidParam(c, "id"), user));
+    return c.json(await takeDelivery(db, loc, uuidParam(c, "id"), user, routes));
   });
   r.post("/driver/orders/:id/delivered", async (c) => {
     const { loc, user } = await myLocation(c, ["driver", "admin"]);
-    return c.json(await completeDelivery(db, loc, uuidParam(c, "id"), user));
+    // An empty body is an old client: handed over in person.
+    const text = await c.req.text();
+    let raw: unknown = { proof: "handed_over" };
+    if (text) {
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        throw new AppError(400, "invalid_json", "The request body must be JSON");
+      }
+    }
+    const proof = parse(DeliveredSchema, raw);
+    return c.json(await completeDelivery(db, loc, uuidParam(c, "id"), user, proof));
   });
   r.post("/driver/orders/:id/location", async (c) => {
     const { loc, user } = await myLocation(c, ["driver", "admin"]);
     const body = parse(DriverLocationSchema, await readJson(c));
     return c.json(await updateDriverLocation(db, loc, uuidParam(c, "id"), user.id, body));
+  });
+
+  // Dispatch (FR-14, FR-15): front of house and admins watch and assign deliveries.
+  r.get("/dispatch", async (c) => {
+    const { loc } = await myLocation(c, ["staff", "admin"]);
+    c.header("Cache-Control", "no-store");
+    return c.json(await dispatchBoard(db, loc));
+  });
+  r.post("/dispatch/orders/:id/assign", async (c) => {
+    const { loc, user } = await myLocation(c, ["staff", "admin"]);
+    const body = parse(AssignSchema, await readJson(c));
+    return c.json(await assignDelivery(db, loc, uuidParam(c, "id"), body.driverId, user));
+  });
+
+  // Receipts: reprint for a guest, find one, and the end-of-day report.
+  r.get("/receipts", async (c) => {
+    const { loc } = await myLocation(c, ["staff", "admin"]);
+    const raw = c.req.query("q")?.trim();
+    const q = raw ? parse(ReceiptSearchSchema, { q: raw }).q : "";
+    c.header("Cache-Control", "no-store");
+    return c.json(await searchReceipts(db, loc, q));
+  });
+  r.get("/receipts/day", async (c) => {
+    const { loc } = await myLocation(c, ["admin"]);
+    c.header("Cache-Control", "no-store");
+    return c.json(await dayReport(db, loc, c.req.query("date") || undefined));
+  });
+  r.get("/receipts/order/:id", async (c) => {
+    const { loc } = await myLocation(c, ["staff", "admin"]);
+    c.header("Cache-Control", "no-store");
+    return c.json(await staffReceiptForOrder(db, loc, uuidParam(c, "id")));
+  });
+  r.get("/receipts/:id", async (c) => {
+    const { loc } = await myLocation(c, ["staff", "admin"]);
+    c.header("Cache-Control", "no-store");
+    return c.json(await staffReceipt(db, loc, uuidParam(c, "id")));
+  });
+  r.post("/receipts/:id/printed", async (c) => {
+    const { loc } = await myLocation(c, ["staff", "admin"]);
+    return c.json(await markPrinted(db, loc, uuidParam(c, "id")));
   });
 
   // Admin.

@@ -202,10 +202,12 @@ async function handleSubscribe(ws: Socket, channelsWanted: string[], since: numb
         : kind === "floor"
           ? staffAllowed(ws.data.user, id, ["staff"])
           : kind === "drivers"
-            ? staffAllowed(ws.data.user, id, ["driver"])
-            : kind === "admin"
-              ? staffAllowed(ws.data.user, id, ["admin"])
-              : true;
+            ? staffAllowed(ws.data.user, id, ["driver", "staff"])
+            : kind === "dispatch"
+              ? staffAllowed(ws.data.user, id, ["staff"])
+              : kind === "admin"
+                ? staffAllowed(ws.data.user, id, ["admin"])
+                : true;
     if (!allowed) {
       send(ws, { op: "error", code: "forbidden", message: "Sign in as staff to see this" });
       ws.close(4401, "forbidden");

@@ -1,6 +1,6 @@
 # PassPlate
 
-Software a restaurant runs for itself, shown as the website of one restaurant. Guests book tables against live availability, order at the table from a QR code, to collect or for delivery, follow their order (and their rider on a map) live, and collect rewards. Staff run the room from a live floor plan, the kitchen from its screen, and drivers from theirs; admins see every transaction. Built to stay correct during a dinner rush, a dropped Wi-Fi connection or a failed server.
+Software a restaurant runs for itself, shown as the website of one restaurant. Guests book tables against live availability, order at the table from a QR code, to collect or for delivery, follow their order (and their rider on a map) live, and collect rewards. Staff run the room from a live floor plan, the kitchen from its screen, deliveries from a live dispatch map, and drivers from their phones; every payment gets a printable receipt, and admins see every transaction and print the end of day. Built to stay correct during a dinner rush, a dropped Wi-Fi connection or a failed server.
 
 The name is a play on the kitchen pass, the counter where finished plates leave the line.
 
@@ -20,6 +20,14 @@ Full requirements: [REQUIREMENTS.md](REQUIREMENTS.md).
 |---|---|---|---|
 | ![Table menu on a phone](docs/screenshots/order-table-phone.jpg) | ![Dish sheet on a phone](docs/screenshots/order-dish-phone.jpg) | ![Order status on a phone](docs/screenshots/order-status-phone.jpg) | ![Kitchen display](docs/screenshots/kitchen-desktop.jpg) |
 
+| Dispatch map | Giving it to a driver | Proof of delivery | Receipt |
+|---|---|---|---|
+| ![Dispatch map with drivers and deliveries](docs/screenshots/dispatch-desktop.jpg) | ![Choosing a driver, nearest suggested](docs/screenshots/dispatch-assign-desktop.jpg) | ![Driver choosing how the food was left](docs/screenshots/driver-proof-phone.jpg) | ![A receipt on a phone](docs/screenshots/receipt-phone.jpg) |
+
+| Nearly there | Finding a receipt | End of day | Delivered |
+|---|---|---|---|
+| ![The guest is told the driver is within 200 m](docs/user-testing/priya-arriving.jpg) | ![Receipts search](docs/screenshots/receipts-desktop.jpg) | ![End of day report](docs/screenshots/day-report-desktop.jpg) | ![Delivered, with how it was left](docs/screenshots/delivered-phone.jpg) |
+
 | One order for the table | Paying | Menu editor | Editing a dish |
 |---|---|---|---|
 | ![Shared table cart with who added each dish](docs/user-testing/theo-table-cart.jpg) | ![Payment step](docs/user-testing/sam-payment.jpg) | ![Menu editor](docs/screenshots/admin-menu-desktop.jpg) | ![Editing a dish](docs/screenshots/admin-menu-dish-desktop.jpg) |
@@ -28,7 +36,7 @@ Full requirements: [REQUIREMENTS.md](REQUIREMENTS.md).
 
 For guests: home (with a booking bar on the first screen), the menu (91 dishes and drinks in twelve sections, each with a real photograph, dietary marks, allergens, filters and search), booking with live availability, our story, visit, an account with rewards, and ordering at the table, to collect or for delivery, with a live status page and a live delivery map.
 
-For staff, behind a sign-in (`/staff`): the floor plan, the kitchen screen, the driver screen, admin (takings, every transaction with refunds and CSV export, the menu editor, the team with invite links, guests) and printable table codes. None of the engineering numbers below appear on the site.
+For staff, behind a sign-in (`/staff`): the floor plan, the kitchen screen, the dispatch map, the driver screen, receipts (find and reprint, end of day), admin (takings, every transaction with refunds and CSV export, the menu editor, the team with invite links, guests) and printable table codes. None of the engineering numbers below appear on the site.
 
 ## Accounts, booking, rewards and delivery
 
@@ -38,7 +46,11 @@ For staff, behind a sign-in (`/staff`): the floor plan, the kitchen screen, the 
 - **Booking.** Fifteen-minute slots inside booking hours; a party holds the smallest table that fits for 90 to 150 minutes. A Postgres exclusion constraint (`btree_gist`, `tstzrange`) makes it impossible to double-book a table, however many people press "book" at once. Availability updates live on every open booking page.
 - **The floor.** Staff set two things by hand (seated, needs clearing); everything else is worked out: reserved (a booking within the hour), food on the way (an order in the kitchen), eating (served, bill not settled). Walk-ins, the waitlist, phone bookings, settling by card or cash.
 - **Rewards.** Every eighth finished order earns 20% off the next, up to £15. Earned in the same transaction that finishes the order, once (a unique constraint), and spent once.
-- **Delivery.** 5 km radius, a fee by distance, £15 minimum. Postcode lookup (postcodes.io) and a map pin choose the address; MapLibre with OpenFreeMap tiles (open data, no API key) draws the map. The driver shares their phone's location (or practises the route indoors) and the guest watches the rider move.
+- **Delivery.** 5 km radius, a fee by distance, £15 minimum. Postcode lookup (postcodes.io) and a map pin choose the address. The driver shares their phone's location every 3 seconds during a delivery only (or practises the route indoors), and the guest watches the rider move with a live arrival time.
+- **Dispatch map (FR-14, FR-15).** Front of house and admins see every delivery and every driver on one live map: deliveries waiting (cooking or ready), who is on the road with their route and arrival time, and everything delivered today. Tapping a delivery lists the drivers on shift, best first (back at the restaurant soonest, fewest already waiting on them), and one tap gives it to them; it appears on that driver's phone as theirs, and nobody else can collect it. Drivers start and end shifts from their phone; ending a shift hands back anything not yet collected. Positions only exist during a delivery: between jobs a driver is shown where their last drop-off was.
+- **Nearly there and proof of delivery (FR-16, FR-18).** Within 200 m of the door the guest's page says the driver is nearly there (once, with a vibration on phones that allow it). At the door the driver records how the food was left (handed over, at the door, with a neighbour, in a safe place), an optional note, and where the phone was; the dispatch map flags any drop-off more than 150 m from the address, and the guest sees it too.
+- **Google Maps with fallback (FR-20, NFR-19 to NFR-21).** Every map is one component with two providers. With `VITE_GOOGLE_MAPS_KEY` set it uses the Google Maps JavaScript API; if Google's script fails, the key is refused or the quota runs out, it switches to MapLibre with OpenFreeMap tiles (open data, no key) on its own, and remembers that for the visit. With `GOOGLE_MAPS_SERVER_KEY` set, the API asks Google's Routes API for the road route once, when the driver sets off, keeps it on the order, and works the arrival time out from it at most every 30 seconds as positions arrive. Each call has a 5 s timeout, retries with jitter and a circuit breaker; any failure falls back to a straight line, so a delivery never waits on Google. Without keys, everything runs on MapLibre and straight lines.
+- **Receipts (NFR-22).** Written by the background worker a moment after the money is taken, never inside the request that took it. A whole table settled at once gets one receipt for every round. Numbers (R-000123) are gap-free per restaurant, handed out under an advisory lock, so several workers can never share or skip one. Each receipt is a frozen copy of what was sold (later menu edits never change it), with the restaurant's VAT number and the 20% VAT inside the total. Guests open theirs from the order page and print it or save it as a PDF; staff find any receipt by its number, the order number or the guest's name and print it on an 80 mm till roll, with every reprint marked "Copy"; a refund gets its own receipt pointing back at the sale. The floor offers "Print receipt" right after settling a table. Admins print an end-of-day report built from the receipts themselves: sales, refunds, delivery fees, rewards, takings by payment method and by service, and VAT.
 - **Paying before the kitchen sees it (FR-8, FR-10).** Collection and delivery orders are saved as "awaiting payment" with their dishes held, and the guest pays on the next screen. Only a confirmed payment sends the ticket to the kitchen. Unpaid orders expire after 15 minutes, giving their dishes back to the menu and any reward back to the guest. With Stripe keys set, the card form is Stripe's own Payment Element (card details go from the browser to Stripe, never to PassPlate) and Stripe's webhook confirms the payment: signature checked, older than five minutes refused, and each event id recorded in the same transaction as its effect, so a retried webhook does nothing (NFR-13). Only `sk_test_` keys are accepted. Calls to Stripe have a timeout, retries with jitter, an idempotency key and a circuit breaker (NFR-19). Without keys, a built-in test provider stands in, including a "declined card" button. Tables settle with staff. Every payment and refund is its own row; a cancelled paid order is refunded, through Stripe when it was paid there.
 - **Menu editor (FR-1).** Admins add and reorder sections and dishes, and change prices, descriptions, photos (upload, or pick from the library), dietary marks, the 14 allergens, portions and choices with their options and prices. Saving reaches every open menu within a second. Options keep their ids when edited, so dishes already in someone's basket still order. Dishes are taken off the menu, never deleted, because past orders name them. Uploaded photos are checked by their bytes (JPEG, PNG or WebP, 3 MB), named by a hash of their content, and cached for a year.
 
@@ -51,14 +63,14 @@ Test values only, created by `bun run db:seed`:
 | Admin | admin@passplate.test | passplate-admin |
 | Front of house | floor@passplate.test | passplate-floor |
 | Kitchen screen (front of house) | kitchen@passplate.test | passplate-kitchen |
-| Driver | driver@passplate.test | passplate-driver |
+| Drivers | driver@passplate.test, tom@passplate.test, ines@passplate.test | passplate-driver |
 | Guest (seven stamps) | guest@passplate.test | passplate-guest |
 
 The seed also adds two weeks of sample trade, tonight's bookings and a few tables mid-service. `bun run db:seed -- --empty` skips them.
 
 ## Simulated user testing
 
-`bun run simulate` (with `bun run dev` running) sends simulated people through the real site in a headless browser, each with their own cookies, tapping and typing: a guest books and cancels a table on her phone; a regular orders, pays, earns and spends a reward; a new guest orders delivery (her first card is declined) while a driver takes it across town and she watches the rider on her map; two walk-ins scan the same table's QR code and build one order on two phones, one sends it and the other is told; the floor manager sees it arrive, settles and resets the table while the admin watches the payment land; the admin changes a price and the guest's open menu updates; a new kitchen hand joins from an invite link and opens the kitchen screen; thirty guests race for the same Saturday table; and a sweep checks every public page on a phone and a desktop. It writes [docs/user-testing/report.md](docs/user-testing/report.md). Last run: 45 of 45 steps passed, no findings. Run `bun run db:seed` afterwards.
+`bun run simulate` (with `bun run dev` running) sends simulated people through the real site in a headless browser, each with their own cookies, tapping and typing: a guest books and cancels a table on her phone; a regular orders, pays, earns and spends a reward; a new guest orders delivery (her first card is declined); a driver starts her shift, the floor manager gives her the delivery on the dispatch map, and she drives it while the guest watches the rider, is told when the driver is nearly there, sees how it was left and opens her receipt; two walk-ins scan the same table's QR code and build one order on two phones, one sends it and the other is told; the floor manager sees it arrive, settles the table, finds the receipt ready to print and resets the table while the admin watches the payment land; the admin changes a price and the guest's open menu updates; a new kitchen hand joins from an invite link and opens the kitchen screen; thirty guests race for the same Saturday table; and a sweep checks every public page on a phone and a desktop. It writes [docs/user-testing/report.md](docs/user-testing/report.md). Last run: 52 of 52 steps passed, no findings. Run `bun run db:seed` afterwards.
 
 ## Design
 
@@ -166,8 +178,12 @@ Open http://localhost:3000. The kitchen screen (`/kitchen/passplate`) signs in w
 
 Online payments use the built-in test provider until Stripe test keys are set: `STRIPE_SECRET_KEY` (`sk_test_...`), `STRIPE_PUBLISHABLE_KEY` (`pk_test_...`) and `STRIPE_WEBHOOK_SECRET` (`whsec_...`), with Stripe's webhook pointed at `/api/v1/webhooks/stripe` (for example with `stripe listen --forward-to localhost:4000/v1/webhooks/stripe`).
 
+Maps use MapLibre and straight-line routes until Google keys are set: `VITE_GOOGLE_MAPS_KEY` (browser key, restricted to your domain, with a daily quota cap), optionally `VITE_GOOGLE_MAP_ID` for a styled map, and `GOOGLE_MAPS_SERVER_KEY` for the Routes API (`GOOGLE_ROUTES_MODE` picks `DRIVE`, the default, `TWO_WHEELER` or `BICYCLE`).
+
+`bun scripts/drivers.ts` is the driver simulator (FR-19): it places paid delivery orders, cooks them on the kitchen account, has the dispatcher give each to the suggested driver, and drives the three demo drivers along their routes with proof at the door. `--deliver 4 --road 2 --assigned 1 --waiting 1 --step 3000` sets how many end in each state and how often a position is sent.
+
 ```bash
-bun run test         # unit + API integration tests, on Postgres and Redis started by Testcontainers (TEST-2)
+bun run test         # 80 unit + API integration tests, on Postgres and Redis started by Testcontainers (TEST-2)
 bun run latency      # FR-10 acceptance check, needs bun run dev
 bun run screenshots  # refreshes docs/screenshots with headless Edge or Chrome, needs bun run dev
 bun run typecheck
@@ -179,11 +195,12 @@ bun run typecheck
 |---|---|
 | `apps/api` | Hono HTTP API: menu, orders, table carts, payments, kitchen, staff, admin |
 | `apps/gateway` | Bun WebSocket gateway with replay |
-| `apps/worker` | Outbox relay |
+| `apps/worker` | Outbox relay, and the receipt writer |
 | `apps/web` | TanStack Start app: diner ordering, order status, kitchen display |
 | `packages/shared` | Zod schemas, order state machine, opening hours, realtime protocol |
 | `packages/db` | Drizzle schema, migrations, seed |
 | `scripts/latency.ts` | End-to-end latency and replay check |
+| `scripts/drivers.ts` | Driver simulator (FR-19) |
 | `load/orders.js`, `scripts/load.ts` | k6 load tests |
 | `infra/edge` | nginx stand-in for the CDN and load balancer |
 | `Dockerfile` | One image for the API, gateway and relay |
@@ -193,5 +210,7 @@ bun run typecheck
 - **The spike and the order budget at design load** (see the load tests): met in shape, not in numbers, on one laptop. Needs separate machines.
 - **A 2-hour soak** (TEST-4): only a 10-minute soak has run so far.
 - **Splitting the bill per person** (the rest of FR-8): the table cart knows who added each dish, which is what a split needs, but settling is still one bill per table.
-- **Several restaurants (multi-tenancy, Milestone 4 of the spec), the dispatcher map, Google Maps with fallback, chaos tests, Lighthouse checks in CI and Playwright** (the simulated users drive a real browser over the DevTools protocol instead).
+- **Google Maps has not run with a real key.** The Routes client is tested against a stand-in for Google's API (the right fields asked for, a refused key not retried, the breaker opening), and the browser fallback was checked with a deliberately invalid key, which switched the map to MapLibre by itself. Places Autocomplete for addresses (the rest of FR-20) is not built; postcode lookup does that job.
+- **Driver simulator routes** follow Google's road route when there is a key, and a gentle curve otherwise; the spec's 200 simulated drivers have not been run.
+- **Several restaurants (multi-tenancy, Milestone 4 of the spec), chaos tests, Lighthouse checks in CI and Playwright** (the simulated users drive a real browser over the DevTools protocol instead).
 - **Integration tests use Testcontainers by default;** set `TEST_DATABASE_URL` and `TEST_REDIS_URL` to run them against servers you already have, such as the `pass_test` database in docker compose.

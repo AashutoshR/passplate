@@ -1,4 +1,5 @@
-import { and, asc, eq, gt, inArray, isNull, ne } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { diningTables, locations, orders, reservations, waitlist, type Db, type Executor, type Tx } from "@pass/db";
 import {
   ACTIVE_STATUSES,
@@ -58,6 +59,16 @@ export async function tableViews(db: Executor, loc: Location, ids?: string[], no
     )
     .orderBy(asc(reservations.startsAt));
   const today = localDate(loc.timezone, now);
+  // The bill just settled on a table being cleared, so staff can print its receipt.
+  const clearing = tables.filter((t) => t.state === "clearing").map((t) => t.id);
+  const settled = clearing.length
+    ? await db
+        .select({ tableId: orders.tableId, id: orders.id, paidAt: orders.paidAt })
+        .from(orders)
+        .where(and(inArray(orders.tableId, clearing), eq(orders.type, "dine_in"), isNotNull(orders.paidAt)))
+        .orderBy(desc(orders.paidAt))
+        .limit(clearing.length * 20)
+    : [];
 
   return tables
     .sort((a, b) => a.label.localeCompare(b.label, "en", { numeric: true }))
@@ -94,6 +105,10 @@ export async function tableViews(db: Executor, loc: Location, ids?: string[], no
           : null,
         openMinor,
         activeOrders: active,
+        settledOrderId:
+          t.state === "clearing"
+            ? (settled.find((o) => o.tableId === t.id && (!t.seatedAt || o.paidAt! >= t.seatedAt))?.id ?? null)
+            : null,
       };
     });
 }
@@ -219,7 +234,9 @@ export async function settleTable(
       .for("update");
     if (unpaid.length === 0 && t.state !== "seated") throw new AppError(409, "nothing_to_pay", "There is nothing to pay on this table");
     const events: OutboxEvent[] = [];
-    for (const o of unpaid) events.push(...(await recordPayment(tx, loc, o, method, takenBy)));
+    // One bill for the table, so one receipt for every round on it.
+    const batchId = randomUUID();
+    for (const o of unpaid) events.push(...(await recordPayment(tx, loc, o, method, takenBy, batchId)));
     if (t.reservationId) {
       await tx
         .update(reservations)

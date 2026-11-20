@@ -1,5 +1,6 @@
 import type { OpeningHours } from "./hours";
 import type { OrderStatus, OrderType } from "./schemas";
+import type { DeliveryProof } from "./delivery";
 
 /** One order as the kitchen and the diner see it. */
 export interface TicketView {
@@ -28,9 +29,22 @@ export interface TicketView {
     lng: number;
     instructions: string | null;
     phone: string | null;
+    driverId: string | null;
     driverName: string | null;
     driver: { lat: number; lng: number; at: string } | null;
+    /** A dispatcher gave it to a driver, before it left the kitchen. */
+    assignedAt: string | null;
+    pickedUpAt: string | null;
+    deliveredAt: string | null;
+    /** The driver came within 200 m (FR-18). */
+    arrivingAt: string | null;
+    etaAt: string | null;
+    /** The road route, fetched once when the driver set off (NFR-20). */
+    route: { provider: "google" | "straight"; polyline: string | null; distanceM: number; durationS: number } | null;
+    proof: { kind: DeliveryProof; note: string | null; lat: number | null; lng: number | null; distanceM: number | null } | null;
   } | null;
+  /** The receipt for this order, once the worker has written it. */
+  receipt: { id: string; number: number } | null;
 }
 
 export interface TicketItemView {
@@ -182,6 +196,7 @@ export interface TransactionView {
     deliveryFeeMinor: number;
   };
   takenBy: string | null;
+  receipt: { id: string; number: number } | null;
 }
 
 export interface TransactionsView {
